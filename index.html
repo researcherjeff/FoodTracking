@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e54a4a">
+  <meta name="description" content="FoodTracker - cloud synced food and nutrition tracking">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <title>FoodTracker</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <section id="auth-view" class="auth-screen">
+      <div class="auth-card">
+        <div class="brand-mark">FT</div>
+        <h1>FoodTracker</h1>
+        <p class="muted">Your food log, synced across your devices.</p>
+
+        <div id="auth-message" class="notice hidden"></div>
+
+        <form id="auth-form" class="stack">
+          <label>Email<input id="auth-email" type="email" autocomplete="email" required></label>
+          <label>Password<input id="auth-password" type="password" autocomplete="current-password" minlength="6" required></label>
+          <button class="primary" id="auth-submit" type="submit">Log In</button>
+        </form>
+
+        <div class="auth-links">
+          <button class="link-button" id="show-signup">Create account</button>
+          <button class="link-button" id="show-reset">Forgot password?</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="main-view" class="hidden">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">FOODTRACKER</div>
+          <h1 id="page-title">Today</h1>
+        </div>
+        <div class="account-area">
+          <span id="user-email" class="muted"></span>
+          <button id="signout-btn" class="ghost">Log Out</button>
+        </div>
+      </header>
+
+      <main class="page-wrap">
+        <section id="today-page" class="page"></section>
+        <section id="foods-page" class="page hidden"></section>
+        <section id="recipes-page" class="page hidden"></section>
+        <section id="history-page" class="page hidden"></section>
+        <section id="settings-page" class="page hidden"></section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="Primary">
+        <button data-tab="today" class="nav-btn active"><span>⌂</span><small>Today</small></button>
+        <button data-tab="foods" class="nav-btn"><span>🍴</span><small>Foods</small></button>
+        <button data-tab="recipes" class="nav-btn"><span>📖</span><small>Recipes</small></button>
+        <button data-tab="history" class="nav-btn"><span>▣</span><small>History</small></button>
+        <button data-tab="settings" class="nav-btn"><span>⚙</span><small>Settings</small></button>
+      </nav>
+    </section>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
