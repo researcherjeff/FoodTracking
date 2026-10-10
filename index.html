@@ -13,22 +13,61 @@
 <body>
   <div id="app" class="app-shell">
     <section id="auth-view" class="auth-screen">
-      <div class="auth-card">
+      <div id="login-panel" class="auth-card auth-panel">
         <div class="brand-mark">FT</div>
-        <h1>FoodTracker</h1>
-        <p class="muted">Your food log, synced across your devices.</p>
+        <div class="eyebrow">YOUR FOOD. YOUR PROGRESS.</div>
+        <h1>Welcome back</h1>
+        <p class="muted">Log in to access your FoodTracker data on any device.</p>
 
-        <div id="auth-message" class="notice hidden"></div>
+        <div id="login-message" class="notice hidden" role="status" aria-live="polite"></div>
 
-        <form id="auth-form" class="stack">
-          <label>Email<input id="auth-email" type="email" autocomplete="email" required></label>
-          <label>Password<input id="auth-password" type="password" autocomplete="current-password" minlength="6" required></label>
-          <button class="primary" id="auth-submit" type="submit">Log In</button>
+        <form id="login-form" class="stack">
+          <label>Email<input id="login-email" name="email" type="email" autocomplete="email" required></label>
+          <label>Password<input id="login-password" name="password" type="password" autocomplete="current-password" required></label>
+          <button class="primary" id="login-submit" type="submit">Log In</button>
         </form>
 
-        <div class="auth-links">
-          <button class="link-button" id="show-signup">Create account</button>
-          <button class="link-button" id="show-reset">Forgot password?</button>
+        <div class="auth-links auth-links-centered">
+          <button class="link-button" id="show-signup" type="button">Create an account</button>
+          <button class="link-button" id="show-reset" type="button">Forgot password?</button>
+        </div>
+      </div>
+
+      <div id="signup-panel" class="auth-card auth-panel hidden">
+        <div class="brand-mark">FT</div>
+        <div class="eyebrow">GET STARTED</div>
+        <h1>Create your account</h1>
+        <p class="muted">Your foods, recipes, and meal history will sync across your devices.</p>
+
+        <div id="signup-message" class="notice hidden" role="status" aria-live="polite"></div>
+
+        <form id="signup-form" class="stack">
+          <label>Email<input id="signup-email" name="email" type="email" autocomplete="email" required></label>
+          <label>Password<input id="signup-password" name="password" type="password" autocomplete="new-password" minlength="6" required><span class="inline-note">Use at least 6 characters.</span></label>
+          <label>Confirm password<input id="signup-confirm-password" name="confirmPassword" type="password" autocomplete="new-password" minlength="6" required></label>
+          <button class="primary" id="signup-submit" type="submit">Create Account</button>
+        </form>
+
+        <div class="auth-links auth-links-centered">
+          <button class="link-button" id="signup-back-to-login" type="button">Already have an account? Log in</button>
+        </div>
+      </div>
+
+      <div id="reset-panel" class="auth-card auth-panel hidden">
+        <div class="brand-mark">FT</div>
+        <div class="eyebrow">ACCOUNT RECOVERY</div>
+        <h1>Reset your password</h1>
+        <p class="muted">We'll send you a link to choose a new password.</p>
+
+        <div id="reset-message" class="notice hidden" role="status" aria-live="polite"></div>
+
+        <form id="reset-form" class="stack">
+          <label>Email<input id="reset-email" name="email" type="email" autocomplete="email" required></label>
+          <button class="primary" id="reset-submit" type="submit">Send Reset Link</button>
+        </form>
+
+        <div class="auth-links auth-links-centered">
+          <button class="link-button" id="reset-back-to-login" type="button">Back to log in</button>
         </div>
       </div>
     </section>

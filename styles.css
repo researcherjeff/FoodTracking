@@ -35,6 +35,14 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .ghost { background: transparent; border: 1px solid var(--border); }
 .link-button { background: transparent; color: var(--red); padding: 4px 0; }
 .auth-links { display:flex; justify-content:space-between; gap: 16px; margin-top: 14px; }
+.auth-panel { animation: auth-panel-in .18s ease-out; }
+.auth-panel .eyebrow { margin-bottom: 8px; }
+.auth-links-centered { justify-content: center; flex-wrap: wrap; }
+.auth-links-centered .link-button { text-align: center; }
+.auth-card .notice { line-height: 1.45; overflow-wrap: anywhere; }
+.inline-note { display: block; margin-top: -2px; }
+@keyframes auth-panel-in { from { opacity: .6; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
 .notice { padding: 12px 14px; border-radius: 12px; margin-top: 14px; background: rgba(229,74,74,.12); border: 1px solid rgba(229,74,74,.24); }
 .topbar { position: sticky; top: 0; z-index: 20; display:flex; justify-content:space-between; gap: 18px; align-items:center; padding: 20px clamp(16px, 3vw, 36px); background: rgba(14,14,16,.93); backdrop-filter: blur(16px); border-bottom: 1px solid rgba(255,255,255,.04); }
 .topbar h1 { margin: 4px 0 0; font-size: clamp(1.55rem, 2vw, 2rem); }

@@ -38,9 +38,21 @@ window.FOODTRACKER_CONFIG = {
 
 Do not put a Supabase `service_role` or secret key in `config.js` or in any browser code. Access is protected by Postgres Row Level Security policies tied to the signed-in user's `auth.uid()`.
 
-## Email confirmation / password reset
+## Email confirmation / password reset (important for GitHub Pages)
 
-Supabase Auth can send confirmation and password-reset emails. For local testing, the site's current URL needs to be allowed in the Auth redirect URL settings. If email confirmation is enabled, a new account may need to click the email before logging in.
+The sign-up form sends an `emailRedirectTo` URL based on the current site's base path. This works with GitHub Pages project sites such as `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/`.
+
+In Supabase, open **Authentication → URL Configuration** and set:
+
+1. **Site URL** to the exact deployed website base URL, including the repository path and trailing slash, for example `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/`.
+2. Under **Redirect URLs**, add that exact URL. You can also add `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/**` if you later use paths below it.
+3. For local development, add `http://localhost:8000/**`.
+
+Replace the examples with your real GitHub Pages username and repository name. For a user/organization site whose repository is named `YOUR-USERNAME.github.io`, the URL is usually `https://YOUR-USERNAME.github.io/`.
+
+The email confirmation template should use Supabase's `{{ .ConfirmationURL }}` link for the **Confirm signup** action. Avoid hard-coding `{{ .SiteURL }}` as the confirmation link destination, because it can bypass the redirect URL requested by the website. Supabase documents redirect allowlisting and the `emailRedirectTo` option here: https://supabase.com/docs/guides/auth/redirect-urls and https://supabase.com/docs/reference/javascript/auth-signup.
+
+The sign-up form is now a separate screen with email, password, and confirm-password fields. It immediately displays a status message after a successful request. If email confirmation is enabled, the user must confirm through the email link before signing in. Authentication errors returned to the app are shown on the login screen instead of leaving the user on a broken URL.
 
 ## Run locally
 

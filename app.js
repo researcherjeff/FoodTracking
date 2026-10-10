@@ -108,16 +108,79 @@ function showToast(message, error = false) {
   window.setTimeout(() => toast.remove(), 3500);
 }
 
-function showAuthMessage(message, error = false) {
-  const el = $('auth-message');
+let authViewMode = 'login';
+
+function showAuthPanel(mode, { preserveEmail = true } = {}) {
+  const previousEmail =
+    $('login-email')?.value.trim() ||
+    $('signup-email')?.value.trim() ||
+    $('reset-email')?.value.trim() || '';
+
+  authViewMode = mode;
+  clearAuthMessage();
+
+  for (const panel of ['login', 'signup', 'reset']) {
+    $(`${panel}-panel`).classList.toggle('hidden', panel !== mode);
+  }
+
+  if (preserveEmail && previousEmail) {
+    const target = $(`${mode}-email`);
+    if (target && !target.value) target.value = previousEmail;
+  }
+
+  if (mode === 'login') $('login-password')?.focus({ preventScroll: true });
+  if (mode === 'signup') $('signup-email')?.focus({ preventScroll: true });
+  if (mode === 'reset') $('reset-email')?.focus({ preventScroll: true });
+}
+
+function showAuthMessage(message, error = false, mode = authViewMode) {
+  const el = $(`${mode}-message`);
+  if (!el) return;
   el.textContent = message;
   el.classList.remove('hidden');
   el.style.borderColor = error ? 'rgba(229,74,74,.5)' : 'rgba(120,200,140,.4)';
 }
 
 function clearAuthMessage() {
-  $('auth-message').classList.add('hidden');
-  $('auth-message').textContent = '';
+  for (const mode of ['login', 'signup', 'reset']) {
+    const el = $(`${mode}-message`);
+    if (!el) continue;
+    el.classList.add('hidden');
+    el.textContent = '';
+    el.style.borderColor = '';
+  }
+}
+
+// Return to this site's root path. This is important for GitHub Pages
+// project sites, whose app URL includes a repository path (for example /foodtracker/).
+function getAppRedirectUrl() {
+  const url = new URL(window.location.href);
+  url.hash = '';
+  url.search = '';
+  if (url.pathname.toLowerCase().endsWith('/index.html')) {
+    url.pathname = url.pathname.slice(0, -'index.html'.length);
+  } else if (!url.pathname.endsWith('/')) {
+    // GitHub Pages may briefly show the project path without its final slash.
+    // Preserve that project/repository path rather than redirecting to the domain root.
+    url.pathname += '/';
+  }
+  return url.toString();
+}
+
+function displayAuthRedirectError() {
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const searchParams = new URLSearchParams(window.location.search);
+  const errorDescription = hashParams.get('error_description') || searchParams.get('error_description');
+  const errorCode = hashParams.get('error_code') || searchParams.get('error_code');
+  const error = hashParams.get('error') || searchParams.get('error');
+  if (!error && !errorDescription && !errorCode) return;
+
+  const message = (errorDescription || errorCode || error || 'The authentication link could not be completed.')
+    .replace(/\+/g, ' ');
+  showAuthPanel('login', { preserveEmail: false });
+  showAuthMessage(`Email confirmation or sign-in link failed: ${message}. Please request a new link or contact support if it continues.`, true, 'login');
+  // Remove the error fragment/query from the visible URL after displaying it.
+  window.history.replaceState({}, document.title, window.location.pathname);
 }
 
 function openModal(html) {
@@ -593,26 +656,169 @@ async function handlePasswordRecovery(){
   $('password-submit').onclick=async()=>{const form=$('password-form');if(!form.reportValidity())return;const d=Object.fromEntries(new FormData(form));if(d.password!==d.confirm){showToast('Passwords do not match.',true);return;}try{const {error}=await supabaseClient.auth.updateUser({password:d.password});if(error)throw error;closeModal();showToast('Password updated.');}catch(error){showToast(error.message,true);}};
 }
 
-async function initAuth(){
-  if(!createClient||!config.SUPABASE_URL||!config.SUPABASE_PUBLISHABLE_KEY||config.SUPABASE_PUBLISHABLE_KEY.includes('YOUR_')){showAuthMessage('Add your Supabase URL and publishable key to config.js before signing in.',true);$('auth-submit').disabled=true;return;}
-  supabaseClient=createClient(config.SUPABASE_URL,config.SUPABASE_PUBLISHABLE_KEY);
-  supabaseClient.auth.onAuthStateChange(async(event,session)=>{
-    currentUser=session?.user||null;
-    if(event==='PASSWORD_RECOVERY'&&currentUser){await handlePasswordRecovery();return;}
-    if(currentUser){$('auth-view').classList.add('hidden');$('main-view').classList.remove('hidden');$('user-email').textContent=currentUser.email||'';try{await loadAll();navigate(activeTab);}catch(error){showToast(error.message,true);}}else{$('main-view').classList.add('hidden');$('auth-view').classList.remove('hidden');}
+async function initAuth() {
+  if (!createClient || !config.SUPABASE_URL || !config.SUPABASE_PUBLISHABLE_KEY || config.SUPABASE_PUBLISHABLE_KEY.includes('YOUR_')) {
+    showAuthPanel('login', { preserveEmail: false });
+    showAuthMessage('Add your Supabase URL and publishable key to config.js before signing in.', true, 'login');
+    $('login-submit').disabled = true;
+    $('signup-submit').disabled = true;
+    $('reset-submit').disabled = true;
+    return;
+  }
+
+  supabaseClient = createClient(config.SUPABASE_URL, config.SUPABASE_PUBLISHABLE_KEY);
+  displayAuthRedirectError();
+
+  supabaseClient.auth.onAuthStateChange(async (event, session) => {
+    currentUser = session?.user || null;
+    if (event === 'PASSWORD_RECOVERY' && currentUser) {
+      await handlePasswordRecovery();
+      return;
+    }
+    if (currentUser) {
+      $('auth-view').classList.add('hidden');
+      $('main-view').classList.remove('hidden');
+      $('user-email').textContent = currentUser.email || '';
+      try {
+        await loadAll();
+        navigate(activeTab);
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    } else {
+      $('main-view').classList.add('hidden');
+      $('auth-view').classList.remove('hidden');
+    }
   });
-  const {data,error}=await supabaseClient.auth.getSession();
-  if(error){showAuthMessage(error.message,true);return;}
-  currentUser=data.session?.user||null;
-  if(currentUser){$('auth-view').classList.add('hidden');$('main-view').classList.remove('hidden');$('user-email').textContent=currentUser.email||'';try{await loadAll();navigate(activeTab);}catch(error){showToast(error.message,true);}}
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) {
+    showAuthMessage(error.message, true, 'login');
+    return;
+  }
+
+  currentUser = data.session?.user || null;
+  if (currentUser) {
+    $('auth-view').classList.add('hidden');
+    $('main-view').classList.remove('hidden');
+    $('user-email').textContent = currentUser.email || '';
+    try {
+      await loadAll();
+      navigate(activeTab);
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  }
 }
 
-function setupEvents(){
-  document.querySelectorAll('.nav-btn').forEach(button=>button.onclick=()=>navigate(button.dataset.tab));
-  $('signout-btn').onclick=signOut;
-  $('show-signup').onclick=async()=>{const email=$('auth-email').value.trim(),password=$('auth-password').value;if(!email||!password){showAuthMessage('Enter an email and password first.',true);return;}try{const {data,error}=await supabaseClient.auth.signUp({email,password});if(error)throw error;showAuthMessage(data.session?'Account created and signed in.':'Account created. Check your email if confirmation is enabled.');}catch(error){showAuthMessage(error.message,true);}};
-  $('show-reset').onclick=async()=>{const email=$('auth-email').value.trim();if(!email){showAuthMessage('Enter your email address first.',true);return;}try{const {error}=await supabaseClient.auth.resetPasswordForEmail(email,{redirectTo:location.href.split('#')[0]});if(error)throw error;showAuthMessage('Password reset email sent.');}catch(error){showAuthMessage(error.message,true);}};
-  $('auth-form').onsubmit=async event=>{event.preventDefault();clearAuthMessage();if(!supabaseClient){showAuthMessage('Configure Supabase first.',true);return;}try{const {error}=await supabaseClient.auth.signInWithPassword({email:$('auth-email').value.trim(),password:$('auth-password').value});if(error)throw error;}catch(error){showAuthMessage(error.message,true);}};
+function setupEvents() {
+  document.querySelectorAll('.nav-btn').forEach(button => {
+    button.onclick = () => navigate(button.dataset.tab);
+  });
+  $('signout-btn').onclick = signOut;
+
+  $('show-signup').onclick = () => showAuthPanel('signup');
+  $('show-reset').onclick = () => showAuthPanel('reset');
+  $('signup-back-to-login').onclick = () => showAuthPanel('login');
+  $('reset-back-to-login').onclick = () => showAuthPanel('login');
+
+  $('login-form').onsubmit = async event => {
+    event.preventDefault();
+    clearAuthMessage();
+    if (!supabaseClient) {
+      showAuthMessage('Supabase is not configured yet. Check config.js.', true, 'login');
+      return;
+    }
+    const submit = $('login-submit');
+    submit.disabled = true;
+    submit.textContent = 'Logging in…';
+    try {
+      const { error } = await supabaseClient.auth.signInWithPassword({
+        email: $('login-email').value.trim(),
+        password: $('login-password').value
+      });
+      if (error) throw error;
+    } catch (error) {
+      showAuthMessage(error.message, true, 'login');
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Log In';
+    }
+  };
+
+  $('signup-form').onsubmit = async event => {
+    event.preventDefault();
+    clearAuthMessage();
+    if (!supabaseClient) {
+      showAuthMessage('Supabase is not configured yet. Check config.js.', true, 'signup');
+      return;
+    }
+
+    const email = $('signup-email').value.trim();
+    const password = $('signup-password').value;
+    const confirmPassword = $('signup-confirm-password').value;
+    if (password !== confirmPassword) {
+      showAuthMessage('Your passwords do not match. Please try again.', true, 'signup');
+      $('signup-confirm-password').focus();
+      return;
+    }
+
+    const submit = $('signup-submit');
+    submit.disabled = true;
+    submit.textContent = 'Creating account…';
+    try {
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: getAppRedirectUrl()
+        }
+      });
+      if (error) throw error;
+
+      if (data.session) {
+        showAuthMessage('Your account is ready. You are now signed in.', false, 'signup');
+      } else {
+        showAuthMessage(
+          `Account request received for ${email}. Check your inbox (and Spam/Junk) for the confirmation email. The confirmation link will return you to FoodTracker. Once confirmed, you can log in here.`,
+          false,
+          'signup'
+        );
+        $('signup-password').value = '';
+        $('signup-confirm-password').value = '';
+      }
+    } catch (error) {
+      showAuthMessage(error.message || 'Account creation failed. Please try again.', true, 'signup');
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Create Account';
+    }
+  };
+
+  $('reset-form').onsubmit = async event => {
+    event.preventDefault();
+    clearAuthMessage();
+    if (!supabaseClient) {
+      showAuthMessage('Supabase is not configured yet. Check config.js.', true, 'reset');
+      return;
+    }
+    const email = $('reset-email').value.trim();
+    const submit = $('reset-submit');
+    submit.disabled = true;
+    submit.textContent = 'Sending…';
+    try {
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: getAppRedirectUrl()
+      });
+      if (error) throw error;
+      showAuthMessage('If an account exists for that email, a password reset link has been sent. Check your inbox and Spam/Junk folder.', false, 'reset');
+    } catch (error) {
+      showAuthMessage(error.message, true, 'reset');
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Send Reset Link';
+    }
+  };
 }
 
 setupEvents();
