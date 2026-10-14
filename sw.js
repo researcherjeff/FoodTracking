@@ -1,4 +1,4 @@
-const CACHE = 'foodtracker-cloud-v2';
+const CACHE = 'foodtracker-cloud-v3';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './config.js', './manifest.json', './assets/icon.svg'
 ];

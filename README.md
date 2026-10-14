@@ -1,33 +1,24 @@
-# FoodTracker Cloud Edition
+# FoodTracker Cloud Edition — Android parity update
 
-This is the cloud-backed version of the FoodTracker web app. It uses a static HTML/CSS/JavaScript front end, Supabase Auth for accounts, and Supabase Postgres for synchronized data.
+FoodTracker is a static HTML/CSS/JavaScript web app backed by Supabase Auth and PostgreSQL. This update brings the main functionality from Android FoodTracker v1.11.7 into the website while keeping the same account and Supabase data model.
 
-## What is included
+## Included website features
 
-- Account creation, login, logout, password reset, and password update flow
-- Cloud-synced foods
-- Favorites and recent foods
-- Portion-based food logging
-- Date navigation
-- Copy meal / copy entire day
-- Edit and delete meal entries
-- Recipes and recipe ingredients
-- Saved meal templates
-- Daily nutrition goals
-- 7-day averages and goal progress
-- History with clickable dates
-- JSON backup/export and import
-- Responsive phone/tablet/desktop layout
-- PWA manifest and service worker
+- Supabase account creation, login/logout, password reset, and password update.
+- Daily food diary with date navigation, portion-based logging, editing/deleting entries, quick log, favorites/recent foods, copying meals or a full day, and reusable saved meals.
+- Food library with search by name and serving size, All/Favorites/Recent filters, sorting by name/calories/protein/carbs, food duplication, edit/delete, saved-food CSV import/export, and a downloadable CSV template. Imports require Name and Calories; Serving Size and macro columns are optional and default to `1 serving` / `0` when omitted.
+- Optional USDA FoodData Central search through the Supabase `food-search` Edge Function. Its API key stays on the server.
+- Recipe builder, nutrition estimate per serving, and recipe logging.
+- Weekly meal planner with Monday–Sunday navigation, portion multipliers, planned calorie/protein estimates, readiness status, and logging/removing planned meals.
+- Weekly grocery list generated from planned meals, saved-recipe ingredient snapshots, manual items, category filters, checked state, editing/removal, share/copy, and print-to-PDF.
+- Dedicated Goals & Progress screen with daily goal editor, progress bars, and 7-day goal-consistency summary.
+- History with 7-/30-day averages, this-week vs previous-week averages, and clickable diary dates.
+- Full JSON backup export/import (account/project validated; import merges rather than deleting existing cloud records), diary CSV export, saved-food CSV export, daily nutrition print/PDF report, weekly nutrition print/PDF report.
+- Responsive layout, swipe navigation, PWA manifest, and service worker.
 
-## Supabase setup
+## Keep the existing configuration
 
-1. Create a Supabase project.
-2. Open the Supabase SQL Editor.
-3. Run `supabase/schema.sql` in full.
-4. In Supabase, open your project's Connect/API settings and copy the Project URL and browser-safe publishable key. The legacy `anon` key also works with this client if your project still exposes it.
-5. Copy `config.example.js` to `config.js`.
-6. Put your real values into `config.js`:
+`config.js` is retained from the supplied website ZIP. It must contain the Supabase Project URL and a **publishable** (or legacy `anon`) browser key:
 
 ```js
 window.FOODTRACKER_CONFIG = {
@@ -36,56 +27,51 @@ window.FOODTRACKER_CONFIG = {
 };
 ```
 
-Do not put a Supabase `service_role` or secret key in `config.js` or in any browser code. Access is protected by Postgres Row Level Security policies tied to the signed-in user's `auth.uid()`.
+Never put a Supabase `service_role` or secret key in browser code. The USDA API key must also remain a Supabase Edge Function secret.
 
-## Email confirmation / password reset (important for GitHub Pages)
+## Supabase database setup
 
-The sign-up form sends an `emailRedirectTo` URL based on the current site's base path. This works with GitHub Pages project sites such as `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/`.
+### If this is a brand-new Supabase project
 
-In Supabase, open **Authentication → URL Configuration** and set:
+1. Open **Supabase Dashboard → SQL Editor**.
+2. Run `supabase/schema.sql` to create the base FoodTracker tables and user-scoped Row Level Security policies.
+3. Run both migration files listed below, in date order.
 
-1. **Site URL** to the exact deployed website base URL, including the repository path and trailing slash, for example `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/`.
-2. Under **Redirect URLs**, add that exact URL. You can also add `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/**` if you later use paths below it.
-3. For local development, add `http://localhost:8000/**`.
+### If the Android app already uses this Supabase project
 
-Replace the examples with your real GitHub Pages username and repository name. For a user/organization site whose repository is named `YOUR-USERNAME.github.io`, the URL is usually `https://YOUR-USERNAME.github.io/`.
+Do **not** rerun the base schema just for this update. The Android app may already have its base tables. Check whether the following migrations were previously run, and only run the ones that are still missing:
 
-The email confirmation template should use Supabase's `{{ .ConfirmationURL }}` link for the **Confirm signup** action. Avoid hard-coding `{{ .SiteURL }}` as the confirmation link destination, because it can bypass the redirect URL requested by the website. Supabase documents redirect allowlisting and the `emailRedirectTo` option here: https://supabase.com/docs/guides/auth/redirect-urls and https://supabase.com/docs/reference/javascript/auth-signup.
+- `supabase/migrations/20261012_planned_meals_sync.sql` — cross-device weekly meal planner.
+- `supabase/migrations/20261013_grocery_list_cloud_sync.sql` — synced manual groceries, recipe ingredient snapshots, and checkbox state.
 
-The sign-up form is now a separate screen with email, password, and confirm-password fields. It immediately displays a status message after a successful request. If email confirmation is enabled, the user must confirm through the email link before signing in. Authentication errors returned to the app are shown on the login screen instead of leaving the user on a broken URL.
+These tables are needed for planner/grocery parity. The website detects missing tables and shows a setup notice instead of preventing the food diary from opening.
+
+## Optional USDA food-database search
+
+The supplied Edge Function is at `supabase/functions/food-search/index.ts`. If it is not already deployed in your Supabase project:
+
+1. Deploy the `food-search` Edge Function using the Supabase CLI or your usual Supabase workflow.
+2. Add `USDA_API_KEY` as an Edge Function secret in Supabase.
+3. Open Foods → **Search Food Database**.
+
+Do not include the USDA API key in `config.js` or commit it to GitHub.
 
 ## Run locally
 
-Because the app uses ES modules and a service worker, run it through a local HTTP server rather than opening `index.html` directly with `file://`.
-
-From the project folder:
+From this folder, run a local HTTP server (ES modules and service workers need HTTP rather than `file://`):
 
 ```bash
 python -m http.server 8000
 ```
 
-Then open:
+Open `http://localhost:8000`.
 
-`http://localhost:8000`
+## Deploy to GitHub Pages
 
-## Deploy
+Publish the contents of `FoodTracking-main` (the folder containing `index.html`) as the site root. `index.html`, `styles.css`, `app.js`, `config.js`, `manifest.json`, `sw.js`, and `assets/` must all remain together. The website is static; Supabase credentials are the only site-specific configuration.
 
-This is a static site. It can be deployed to any static hosting provider that serves the files over HTTPS. Update `config.js` with your Supabase project values before publishing.
+For Supabase Auth email confirmation and password recovery, set the exact deployed site URL in **Authentication → URL Configuration**, include the redirect URL in the allowlist, and make sure the confirmation email uses Supabase's `{{ .ConfirmationURL }}` template link.
 
-## Data model
+## Backup notes
 
-The cloud schema mirrors the app's core Android data model:
-
-- `foods`
-- `meal_entries`
-- `daily_goals`
-- `recipes`
-- `recipe_ingredients`
-- `meal_templates`
-- `meal_template_entries`
-
-Every user-owned row contains `user_id`, and the SQL enables Row Level Security and grants authenticated users access only to rows belonging to their own `auth.uid()`.
-
-## Backup
-
-The Settings page has Export Backup and Import Backup. The backup is JSON and is useful as a portability/safety copy even though the main data now lives in the cloud.
+Full backup JSON files contain diary, foods, recipes, saved meals, goals, and (when enabled) planner/grocery data. The website can import Android `FoodTracker.FullBackup` JSON files as well as its own web backup format. Keep backups private. Restore validates the account and Supabase project when that metadata is present, then merges records into the current account; it does not delete existing cloud records. CSV diary export includes totals calculated from each entry's servings. Nutrition reports can be printed or saved to PDF from the browser print dialog.
