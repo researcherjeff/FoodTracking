@@ -32,6 +32,8 @@ const state = {
   quickLogExpanded: false,
   foodFilter: 'all',
   foodSort: 'name',
+  foodSearch: '',
+  plannerDetailsExpanded: false,
   historyRange: 7,
   plannerAnchor: localDateString(new Date()),
   plannerSelectedDate: localDateString(new Date()),
@@ -359,46 +361,69 @@ function progressPercent(value, goal) {
 }
 
 function dateBar() {
-  const today = localDateString(new Date());
+  const today = todayString();
+  const isToday = selectedDate === today;
   return `<div class="date-bar">
     <button class="ghost" id="prev-day" aria-label="Previous day">‹</button>
-    <div class="date-label">${esc(fmtDate(selectedDate))}</div>
+    <div class="date-display"><div class="date-label">${esc(fmtDate(selectedDate))}</div>${isToday ? '<span class="date-context">Current day</span>' : '<button class="text-link" id="jump-today">Today</button>'}</div>
     <input id="date-picker" type="date" value="${esc(selectedDate)}" max="${today}" aria-label="Choose date">
     <button class="ghost" id="next-day" aria-label="Next day" ${selectedDate >= today ? 'disabled' : ''}>›</button>
   </div>`;
 }
 
+function goalDifferenceStatus(value, goal, unit) {
+  if (goal <= 0) return unit === 'kcal' ? 'No calorie goal set' : 'No protein goal set';
+  const difference = goal - value;
+  // Match the Android Today card's integer and sub-one-unit wording.
+  if (difference >= 1) return `${Math.trunc(difference)} ${unit} left`;
+  if (difference > 0) return `Less than 1 ${unit} left`;
+  if (difference === 0) return 'Goal reached';
+  if (difference > -1) return `Less than 1 ${unit} over`;
+  return `${Math.trunc(-difference)} ${unit} over`;
+}
+
 function nutritionCard(entries) {
   const cal = total(entries, 'calories'), protein = total(entries, 'protein');
   const carbs = total(entries, 'carbs'), fat = total(entries, 'fat'), fiber = total(entries, 'fiber');
-  return `<div class="card"><div class="kpi"><div><div class="big">${Math.round(cal).toLocaleString()}</div><div class="muted">/ ${Math.round(num(state.goals.calorie_goal)).toLocaleString()} calories</div></div><div class="muted">Daily totals</div></div>
-    <div class="progress" style="margin-top:10px"><span style="width:${progressPercent(cal,num(state.goals.calorie_goal))}%"></span></div>
-    <div class="kpi" style="margin-top:16px"><strong>Protein</strong><span>${Math.round(protein)} / ${Math.round(num(state.goals.protein_goal))} g</span></div>
-    <div class="progress" style="margin-top:6px"><span style="width:${progressPercent(protein,num(state.goals.protein_goal))}%"></span></div>
-    <div class="actions" style="margin-top:14px"><button id="toggle-more-nutrition">${state.showMoreNutrition?'Hide':'More'} nutrition ${state.showMoreNutrition?'−':'+'}</button><button id="open-goals-from-today">Goals & progress</button></div>
+  const calorieGoal = num(state.goals.calorie_goal), proteinGoal = num(state.goals.protein_goal);
+  return `<div class="card"><div class="nutrition-summary-grid">
+      <div class="nutrition-primary-metric"><div class="metric-label">Calories</div><div class="big">${Math.round(cal).toLocaleString()} <span class="metric-goal">/ ${Math.round(calorieGoal).toLocaleString()} kcal</span></div><div class="metric-status">${esc(goalDifferenceStatus(cal,calorieGoal,'kcal'))}</div><div class="progress" style="margin-top:8px"><span style="width:${progressPercent(cal,calorieGoal)}%"></span></div></div>
+      <div class="nutrition-primary-metric"><div class="metric-label">Protein</div><div class="big">${Math.round(protein)} <span class="metric-goal">/ ${Math.round(proteinGoal)} g</span></div><div class="metric-status">${esc(goalDifferenceStatus(protein,proteinGoal,'g'))}</div><div class="progress" style="margin-top:8px"><span style="width:${progressPercent(protein,proteinGoal)}%"></span></div></div>
+    </div>
+    <div class="actions" style="margin-top:14px"><button id="toggle-more-nutrition">${state.showMoreNutrition?'Hide macros':'More nutrition'}</button><button id="open-goals-from-today">Goals & progress</button></div>
     ${state.showMoreNutrition ? `<div class="grid grid-3 macro-more" style="margin-top:16px">${miniMacro('Carbs',carbs,num(state.goals.carbs_goal))}${miniMacro('Fat',fat,num(state.goals.fat_goal))}${miniMacro('Fiber',fiber,num(state.goals.fiber_goal))}</div>` : ''}
   </div>`;
 }
 
-function miniMacro(label,value,goal) { return `<div><strong>${Math.round(value)} / ${Math.round(goal)}g</strong><div class="muted">${esc(label)}</div></div>`; }
+function miniMacro(label,value,goal) {
+  const status = goal <= 0 ? 'No goal' : Math.abs(value-goal)<1 ? 'Goal reached' : value<goal ? `${Math.floor(goal-value)} g left` : `${Math.floor(value-goal)} g over`;
+  return `<div class="macro-summary"><strong>${Math.round(value)} / ${Math.round(goal)} g</strong><div class="muted">${esc(label)}</div><div class="progress"><span style="width:${progressPercent(value,goal)}%"></span></div><div class="metric-status">${esc(status)}</div></div>`;
+}
 
-function quickLogHtml() {
-  const favorites = state.foods.filter(f => f.is_favorite).sort(sortByName);
+function recentSavedFoods(limit = 5) {
   const recentIds = [];
-  for (const entry of state.entries) {
-    if (entry.entry_type !== 'FOOD' || !entry.food_id || recentIds.includes(entry.food_id)) continue;
-    recentIds.push(entry.food_id);
-    if (recentIds.length === 5) break;
-  }
-  const recents = recentIds.map(id => state.foods.find(f => f.id === id)).filter(Boolean);
-  const combined = [...favorites, ...recents.filter(r => !favorites.some(f => f.id === r.id))].slice(0, 10);
+  [...state.entries]
+    .filter(entry => String(entry.entry_type || 'FOOD').toUpperCase() === 'FOOD' && entry.food_id != null)
+    .sort((a,b) => Number(b.id || 0) - Number(a.id || 0))
+    .forEach(entry => {
+      const id = Number(entry.food_id);
+      if (!recentIds.includes(id) && recentIds.length < limit) recentIds.push(id);
+    });
+  return recentIds.map(id => state.foods.find(food => Number(food.id) === id)).filter(Boolean);
+}
 
-  if (!combined.length) return '<div class="empty">Favorite or log a food once and it will appear here.</div>';
-
-  return combined.map(food => `<div class="entry">
+function quickLogFoodRows(foods) {
+  return foods.map(food => `<div class="entry">
     <div class="entry-main"><div class="entry-name">${esc(food.name)}</div><div class="entry-meta">${esc(food.serving_size)} • ${Math.round(num(food.calories))} cal • ${Math.round(num(food.protein))}g protein</div></div>
     <div class="entry-actions"><button class="primary" data-quick-food="${food.id}">Log</button></div>
   </div>`).join('');
+}
+
+function quickLogHtml() {
+  const favorites = state.foods.filter(f => f.is_favorite).sort(sortByName);
+  const recents = recentSavedFoods(5);
+  if (!favorites.length && !recents.length) return '<div class="empty">Favorite or log a food once and it will appear here.</div>';
+  return `${favorites.length ? `<section class="quick-log-group"><h3>Favorites</h3>${quickLogFoodRows(favorites)}</section>` : ''}${recents.length ? `<section class="quick-log-group"><h3>Recent</h3>${quickLogFoodRows(recents)}</section>` : ''}`;
 }
 
 function renderToday() {
@@ -406,8 +431,7 @@ function renderToday() {
   const meals = ['Breakfast','Lunch','Dinner','Snack'];
   const isToday = selectedDate === todayString();
   const favoriteCount = state.foods.filter(f => f.is_favorite).length;
-  const recentIds = [...new Set(state.entries.filter(e => e.food_id && e.entry_type !== 'RECIPE').map(e => e.food_id))].slice(0,5);
-  const recentCount = recentIds.length;
+  const recentCount = recentSavedFoods(5).length;
   $('today-page').innerHTML = `${dateBar()}
     <div class="actions today-actions"><button class="primary" id="add-food-today">+ Add Food</button><button id="saved-meals-btn">Saved Meals</button><button id="weekly-planner-btn">Weekly Planner</button>${entries.length?'<button id="copy-day-btn">Copy Entire Day</button>':''}</div>
     ${nutritionCard(entries)}
@@ -420,6 +444,7 @@ function renderToday() {
   $('prev-day').onclick=()=>{selectedDate=shiftDate(selectedDate,-1);renderToday();};
   $('next-day').onclick=()=>{if(selectedDate<todayString()){selectedDate=shiftDate(selectedDate,1);renderToday();}};
   $('date-picker').onchange=e=>{if(e.target.value){selectedDate=e.target.value;renderToday();}};
+  $('jump-today')?.addEventListener('click',()=>{selectedDate=todayString();renderToday();});
   $('add-food-today').onclick=()=>openAddFoodModal(selectedDate, 'Dinner');
   document.querySelectorAll('[data-add-food-meal]').forEach(b=>b.onclick=()=>openAddFoodModal(selectedDate,b.dataset.addFoodMeal));
   $('saved-meals-btn').onclick=()=>openSavedMealsModal();
@@ -438,9 +463,11 @@ function renderToday() {
 
 function renderMeal(mealType, entries) {
   const entriesForMeal = entries.filter(e => String(e.meal_type).toLowerCase() === mealType.toLowerCase());
+  const mealCalories = total(entriesForMeal, 'calories');
+  const subtitle = entriesForMeal.length ? `${Math.round(mealCalories).toLocaleString()} calories · ${entriesForMeal.length} item${entriesForMeal.length===1?'':'s'}` : 'No food logged yet';
   return `<div class="card meal-section" style="margin-bottom:12px">
     <div class="meal-header">
-      <h3>${esc(mealType)}</h3>
+      <div class="meal-title-wrap"><h3>${esc(mealType)}</h3><div class="meal-subtitle">${subtitle}</div></div>
       <div class="actions"><button class="primary" data-add-food-meal="${esc(mealType)}">+ Add Food</button>${entriesForMeal.length?`<button data-save-meal="${esc(mealType)}">Save</button><button data-copy-meal="${esc(mealType)}">Copy</button>`:''}</div>
     </div>
     ${entriesForMeal.length ? entriesForMeal.map(renderEntry).join('') : '<div class="empty meal-empty">No foods added yet.</div>'}
@@ -463,15 +490,14 @@ function renderEntry(entry) {
 
 function renderFoods() {
   $('foods-page').innerHTML = `<div class="actions foods-toolbar"><button class="primary" id="new-food-btn">+ Add Food</button><button id="food-database-btn">Search Food Database</button><button id="export-foods-csv">Export CSV</button><button id="import-foods-csv-btn">Import CSV</button><input id="foods-csv-file" type="file" accept=".csv,text/csv" class="hidden"></div>
-    <div class="card foods-filters"><label>Search name or serving size<input id="food-search" placeholder="Search foods or serving sizes…"></label>
+    <div class="card foods-filters"><label>Search name or serving size<input id="food-search" value="${esc(state.foodSearch)}" placeholder="Search foods or serving sizes…"></label>
       <div class="filter-sort-row"><div class="segmented" role="group" aria-label="Food filter">${[['all','All'],['favorites','Favorites'],['recent','Recent']].map(([v,l])=>`<button data-food-filter="${v}" class="${state.foodFilter===v?'active':''}">${l}</button>`).join('')}</div>
       <label>Sort by<select id="food-sort"><option value="name">Name A–Z</option><option value="calories-asc">Calories low–high</option><option value="calories-desc">Calories high–low</option><option value="protein-desc">Protein high–low</option><option value="carbs-asc">Carbs low–high</option></select></label></div><div id="food-count" class="inline-note" style="margin-top:10px"></div></div><div id="food-list" class="grid food-list"></div>`;
   $('food-sort').value=state.foodSort;
   const list=$('food-list');
   const draw=()=>{
-    const query=$('food-search').value.trim().toLowerCase();
-    const recentIds=[];
-    [...state.entries].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).forEach(e=>{if(e.food_id&&!recentIds.includes(e.food_id))recentIds.push(e.food_id);});
+    const query=state.foodSearch.trim().toLowerCase();
+    const recentIds=recentSavedFoods(Math.max(state.entries.length,5)).map(food=>Number(food.id));
     let filtered=state.foods.filter(f=>(`${f.name||''} ${f.serving_size||''}`).toLowerCase().includes(query));
     if(state.foodFilter==='favorites')filtered=filtered.filter(f=>f.is_favorite);
     if(state.foodFilter==='recent')filtered=filtered.filter(f=>recentIds.includes(f.id)).sort((a,b)=>recentIds.indexOf(a.id)-recentIds.indexOf(b.id));
@@ -481,14 +507,15 @@ function renderFoods() {
     if(state.foodSort==='protein-desc')filtered.sort((a,b)=>num(b.protein)-num(a.protein)||sortByName(a,b));
     if(state.foodSort==='carbs-asc')filtered.sort((a,b)=>num(a.carbs)-num(b.carbs)||sortByName(a,b));
     $('food-count').textContent = `${filtered.length} ${filtered.length===1?'food':'foods'} shown`;
-    list.innerHTML=filtered.length?filtered.map(food=>`<div class="card food-card"><div class="entry"><div class="entry-main"><div class="entry-name">${esc(food.name)}</div><div class="entry-meta">${esc(food.serving_size)}</div><div class="entry-macros">${Math.round(num(food.calories))} cal • ${Math.round(num(food.protein))}g protein • ${Math.round(num(food.carbs))}g carbs • ${Math.round(num(food.fat))}g fat • ${Math.round(num(food.fiber))}g fiber</div></div><div class="entry-actions food-actions"><button title="${food.is_favorite?'Remove favorite':'Add favorite'}" data-fav-food="${food.id}">${food.is_favorite?'★':'☆'}</button><button class="primary" data-food-log="${food.id}">Log</button><button data-food-edit="${food.id}">Edit</button><button data-food-duplicate="${food.id}">Duplicate</button><button class="ghost" data-food-delete="${food.id}">Delete</button></div></div></div>`).join(''):'<div class="card empty">No matching foods.</div>';
+    const emptyMessage = !state.foods.length ? 'No foods saved yet.' : query ? 'No foods match your search.' : state.foodFilter==='favorites' ? 'No favorite foods yet. Tap the star on a food to add it to Favorites.' : state.foodFilter==='recent' ? 'No recently logged foods yet.' : 'No matching foods found.';
+    list.innerHTML=filtered.length?filtered.map(food=>`<div class="card food-card"><div class="entry"><div class="entry-main"><div class="entry-name">${esc(food.name)}</div><div class="entry-meta">${esc(food.serving_size)}</div><div class="entry-macros">${Math.round(num(food.calories))} cal • ${Math.round(num(food.protein))}g protein • ${Math.round(num(food.carbs))}g carbs • ${Math.round(num(food.fat))}g fat • ${Math.round(num(food.fiber))}g fiber</div></div><div class="entry-actions food-actions"><button title="${food.is_favorite?'Remove favorite':'Add favorite'}" data-fav-food="${food.id}">${food.is_favorite?'★':'☆'}</button><button class="primary" data-food-log="${food.id}">Log</button><button data-food-edit="${food.id}">Edit</button><button data-food-duplicate="${food.id}">Duplicate</button><button class="ghost" data-food-delete="${food.id}">Delete</button></div></div></div>`).join(''):`<div class="card empty">${esc(emptyMessage)}</div>`;
     document.querySelectorAll('[data-fav-food]').forEach(b=>b.onclick=()=>toggleFavorite(Number(b.dataset.favFood)));
-    document.querySelectorAll('[data-food-log]').forEach(b=>b.onclick=()=>openLogFoodModal(Number(b.dataset.foodLog),selectedDate||todayString()));
+    document.querySelectorAll('[data-food-log]').forEach(b=>b.onclick=()=>openLogFoodModal(Number(b.dataset.foodLog),todayString()));
     document.querySelectorAll('[data-food-edit]').forEach(b=>b.onclick=()=>openFoodEditModal(Number(b.dataset.foodEdit)));
     document.querySelectorAll('[data-food-delete]').forEach(b=>b.onclick=()=>confirmDeleteFood(Number(b.dataset.foodDelete)));
     document.querySelectorAll('[data-food-duplicate]').forEach(b=>b.onclick=()=>duplicateFood(Number(b.dataset.foodDuplicate)));
   };
-  $('food-search').oninput=draw;
+  $('food-search').oninput=e=>{state.foodSearch=e.target.value;draw();};
   $('food-sort').onchange=e=>{state.foodSort=e.target.value;draw();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-food-filter]').forEach(b=>b.onclick=()=>{state.foodFilter=b.dataset.foodFilter;renderFoods();});
   $('new-food-btn').onclick=()=>openFoodEditModal(null);
@@ -833,7 +860,7 @@ function openFoodPicker(ingredients, returnToRecipe) {
   openModal(`<div class="modal-header"><h2>Choose Food</h2><button class="ghost" data-close>Close</button></div><div class="modal-body"><input id="picker-search" placeholder="Search foods..."><div id="picker-list"></div></div>`);
   const draw=()=>{const q=$('picker-search').value.trim().toLowerCase();const filtered=state.foods.filter(f=>f.name.toLowerCase().includes(q));$('picker-list').innerHTML=filtered.length?filtered.map(f=>`<div class="entry" data-picker-food="${f.id}"><div class="entry-main"><strong>${esc(f.name)}</strong><div class="muted">${esc(f.serving_size)} • ${Math.round(num(f.calories))} cal</div></div><button>Select</button></div>`).join(''):'<div class="empty">No foods found.</div>';document.querySelectorAll('[data-picker-food]').forEach(row=>row.onclick=()=>{const food=state.foods.find(f=>f.id===Number(row.dataset.pickerFood));closeModal();previous.push({food_id:food.id,food_name:food.name,serving_size:food.serving_size,calories:food.calories,protein:food.protein,carbs:food.carbs,fat:food.fat,fiber:food.fiber,quantity:1});returnToRecipe(previous);});};$('picker-search').oninput=draw;draw();}
 
-async function openRecipeLogModal(id){const recipe=state.recipes.find(r=>r.id===id);if(!recipe)return;const nutrition=recipeNutrition(id);openModal(`<div class="modal-header"><h2>Log Recipe</h2><button class="ghost" data-close>Close</button></div><form id="recipe-log-form" class="modal-body"><h3>${esc(recipe.name)}</h3><div class="muted">${Math.round(nutrition.calories)} calories per serving</div><label>Meal<select name="meal_type"><option>Breakfast</option><option>Lunch</option><option selected>Dinner</option><option>Snack</option></select></label><label>Servings eaten<input name="servings" type="number" min="0.25" step="0.25" value="1" required></label><div class="card"><strong id="recipe-log-preview">${Math.round(nutrition.calories)} calories</strong><div class="muted">${Math.round(nutrition.protein)}g protein • ${Math.round(nutrition.carbs)}g carbs • ${Math.round(nutrition.fat)}g fat • ${Math.round(nutrition.fiber)}g fiber</div></div></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="recipe-log-submit">Log Recipe</button></div>`);document.querySelector('#recipe-log-form [name="servings"]').oninput=()=>{const s=Math.max(num(document.querySelector('#recipe-log-form [name="servings"]').value),0);$('recipe-log-preview').textContent=`${Math.round(nutrition.calories*s)} calories`;};$('recipe-log-submit').onclick=async()=>{const form=$('recipe-log-form');if(!form.reportValidity())return;const data=Object.fromEntries(new FormData(form));const servings=Math.max(num(data.servings),.25);try{await dbInsert('meal_entries',{user_id:currentUser.id,date:selectedDate,meal_type:data.meal_type,servings,entry_type:'RECIPE',food_id:null,recipe_id:recipe.id,food_name:recipe.name,serving_size:'1 recipe serving',calories:nutrition.calories,protein:nutrition.protein,carbs:nutrition.carbs,fat:nutrition.fat,fiber:nutrition.fiber});closeModal();await loadAll();renderCurrentPage();showToast(`Recipe logged to ${fmtDate(selectedDate)}.`);}catch(error){showToast(error.message,true);}};}
+async function openRecipeLogModal(id){const recipe=state.recipes.find(r=>r.id===id);if(!recipe)return;const nutrition=recipeNutrition(id);openModal(`<div class="modal-header"><h2>Log Recipe</h2><button class="ghost" data-close>Close</button></div><form id="recipe-log-form" class="modal-body"><h3>${esc(recipe.name)}</h3><div class="muted">${Math.round(nutrition.calories)} calories per serving</div><label>Meal<select name="meal_type"><option>Breakfast</option><option>Lunch</option><option selected>Dinner</option><option>Snack</option></select></label><label>Servings eaten<input name="servings" type="number" min="0.25" step="0.25" value="1" required></label><div class="card"><strong id="recipe-log-preview">${Math.round(nutrition.calories)} calories</strong><div class="muted">${Math.round(nutrition.protein)}g protein • ${Math.round(nutrition.carbs)}g carbs • ${Math.round(nutrition.fat)}g fat • ${Math.round(nutrition.fiber)}g fiber</div></div></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="recipe-log-submit">Log Recipe</button></div>`);document.querySelector('#recipe-log-form [name="servings"]').oninput=()=>{const s=Math.max(num(document.querySelector('#recipe-log-form [name="servings"]').value),0);$('recipe-log-preview').textContent=`${Math.round(nutrition.calories*s)} calories`;};$('recipe-log-submit').onclick=async()=>{const form=$('recipe-log-form');if(!form.reportValidity())return;const data=Object.fromEntries(new FormData(form));const servings=Math.max(num(data.servings),.25);try{await dbInsert('meal_entries',{user_id:currentUser.id,date:todayString(),meal_type:data.meal_type,servings,entry_type:'RECIPE',food_id:null,recipe_id:recipe.id,food_name:recipe.name,serving_size:'1 recipe serving',calories:nutrition.calories,protein:nutrition.protein,carbs:nutrition.carbs,fat:nutrition.fat,fiber:nutrition.fiber});closeModal();await loadAll();renderCurrentPage();showToast(`Recipe logged to ${fmtDate(todayString())}.`);}catch(error){showToast(error.message,true);}};}
 
 async function confirmDeleteRecipe(id){const recipe=state.recipes.find(r=>r.id===id);if(!recipe||!confirm(`Delete ${recipe.name}? Existing history remains.`))return;try{const {error:a}=await supabaseClient.from('recipe_ingredients').delete().eq('recipe_id',id);if(a)throw a;const {error:b}=await supabaseClient.from('recipes').delete().eq('id',id);if(b)throw b;await loadAll();renderRecipes();showToast('Recipe deleted.');}catch(error){showToast(error.message,true);}}
 
@@ -1108,7 +1135,7 @@ async function importBackup(event) {
 async function signOut(){if(!supabaseClient)return;try{await supabaseClient.auth.signOut();}catch(error){showToast(error.message,true);}}
 
 async function handlePasswordRecovery(){
-  openModal(`<div class="modal-header"><h2>Set New Password</h2><button class="ghost" data-close>Close</button></div><form id="password-form" class="modal-body"><label>New password<input name="password" type="password" minlength="6" required></label><label>Confirm password<input name="confirm" type="password" minlength="6" required></label></form><div class="modal-footer"><button class="primary" id="password-submit">Update Password</button></div>`);
+  openModal(`<div class="modal-header"><h2>Set New Password</h2><button class="ghost" data-close>Close</button></div><form id="password-form" class="modal-body"><label>New password<input name="password" type="password" minlength="8" required></label><label>Confirm password<input name="confirm" type="password" minlength="8" required></label></form><div class="modal-footer"><button class="primary" id="password-submit">Update Password</button></div>`);
   $('password-submit').onclick=async()=>{const form=$('password-form');if(!form.reportValidity())return;const d=Object.fromEntries(new FormData(form));if(d.password!==d.confirm){showToast('Passwords do not match.',true);return;}try{const {error}=await supabaseClient.auth.updateUser({password:d.password});if(error)throw error;closeModal();showToast('Password updated.');}catch(error){showToast(error.message,true);}};
 }
 
@@ -1493,7 +1520,8 @@ function renderGoals(){
   ];
   const todayRows=goalSpecs.map(spec=>{
     const current=total(todayEntries,spec.key),goal=num(state.goals[spec.goalKey]);
-    const status=spec.lower?(current<=goal?'within goal':`${Math.round(current-goal)} ${spec.unit} over`):(current>=goal?'goal reached':`${Math.round(goal-current)} ${spec.unit} to goal`);
+    const diff=goal-current;
+    const status=spec.lower?(diff>0.5?`${Math.round(diff)} ${spec.unit} remaining`:diff>=-0.5?'At goal':`${Math.round(Math.abs(diff))} ${spec.unit} over goal`):(diff>0.5?`${Math.round(diff)} ${spec.unit} to goal`:'Goal reached');
     return {...spec,current,goal,status,pct:goal>0?Math.min(current/goal*100,100):0};
   });
   const weekDates=Array.from({length:7},(_,i)=>shiftDate(start,i));
@@ -1534,22 +1562,36 @@ function openGoalsEditModal(){
 // ---------- Android parity: weekly meal planner ----------
 function templateEntries(templateId){return state.templateEntries.filter(e=>Number(e.template_id)===Number(templateId));}
 function planStats(plans){const out={calories:0,protein:0,carbs:0,fat:0,fiber:0};for(const p of plans){for(const e of templateEntries(p.template_id)){const m=num(p.servings_multiplier)||1;for(const k of Object.keys(out))out[k]+=num(e[k])*num(e.servings)*m;}}return out;}
-function plannerReadiness(date){const ps=state.plannedMeals.filter(p=>p.planned_date===date);if(!ps.length)return {label:'Needs plan',cls:'status-neutral'};const n=planStats(ps);if(n.calories>num(state.goals.calorie_goal))return {label:'Over calorie goal',cls:'status-warn'};if(n.calories<num(state.goals.calorie_goal)||n.protein<num(state.goals.protein_goal))return {label:'Below target',cls:'status-neutral'};return {label:'Targets met',cls:'status-good'};}
+function plannerReadiness(date){const ps=state.plannedMeals.filter(p=>p.planned_date===date);if(!ps.length)return {label:'No plan',cls:'status-neutral'};const n=planStats(ps),calLow=n.calories<num(state.goals.calorie_goal),calHigh=n.calories>num(state.goals.calorie_goal),proteinLow=n.protein<num(state.goals.protein_goal);const openSlots=['Breakfast','Lunch','Dinner','Snack'].filter(m=>!ps.some(p=>p.meal_type===m)).length;let label;if(proteinLow&&calLow)label='Cal + protein low';else if(proteinLow&&calHigh)label='Protein low, cal high';else if(proteinLow)label='Protein low';else if(calLow)label='Calories low';else if(calHigh)label='Over calorie goal';else if(openSlots)label=`${openSlots} slots open`;else label='Targets met';return {label,cls:proteinLow||calLow?'status-neutral':calHigh?'status-warn':openSlots?'status-neutral':'status-good'};}
 function renderPlanner(openGroceries=false){
   const weekStart=mondayOf(state.plannerAnchor||todayString()),weekEnd=shiftDate(weekStart,6);
   if(state.plannerSelectedDate<weekStart||state.plannerSelectedDate>weekEnd)state.plannerSelectedDate=weekStart;
   const selected=state.plannerSelectedDate,plans=state.plannedMeals.filter(p=>p.planned_date===selected);
   const dates=Array.from({length:7},(_,i)=>shiftDate(weekStart,i));
-  if(!state.plannerAvailable){$('planner-page').innerHTML=`<div class=\"card setup-warning\"><h2>Weekly Planner isn't enabled on Supabase yet</h2><p>Run <code>supabase/migrations/20261012_planned_meals_sync.sql</code> in Supabase SQL Editor, then use Settings → Refresh Cloud Data.</p><p class=\"muted\">This is a one-time database setup. Other website features can still be used without this migration.</p></div>`;return;}
+  if(!state.plannerAvailable){$('planner-page').innerHTML=`<div class="card setup-warning"><h2>Weekly Planner isn't enabled on Supabase yet</h2><p>Run <code>supabase/migrations/20261012_planned_meals_sync.sql</code> in Supabase SQL Editor, then use Settings → Refresh Cloud Data.</p><p class="muted">This is a one-time database setup. Other website features can still be used without this migration.</p></div>`;return;}
   const stats=planStats(plans);
-  $('planner-page').innerHTML=`<div class=\"card\"><div class=\"meal-header\"><div><h2>Weekly Meal Planner</h2><div class=\"muted\">${fmtShortDate(weekStart)} – ${fmtDate(weekEnd)}</div></div><div class=\"actions\"><button id=\"planner-prev-week\">‹ Week</button><button id=\"planner-this-week\">This week</button><button id=\"planner-next-week\">Week ›</button></div></div><div class=\"week-day-grid\">${dates.map((d,i)=>{const st=plannerReadiness(d);return `<button class=\"week-day ${d===selected?'active':''}\" data-plan-day=\"${d}\"><small>${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}</small><strong>${dateFromString(d).getDate()}</strong><span class=\"${st.cls}\">${state.plannedMeals.some(p=>p.planned_date===d)?'●':'○'}</span><small>${st.label}</small></button>`;}).join('')}</div></div>
-    <div class=\"card\" style=\"margin-top:14px\"><div class=\"section-title\" style=\"margin-top:0\"><div><h2>${esc(fmtDate(selected))}</h2><div class=\"muted\">Planned meals are estimates, not logged food or medical advice.</div></div><button class=\"primary\" id=\"planner-add-meal\">+ Add Meal</button></div><div class=\"grid grid-2\"><div><div class=\"big\">${Math.round(stats.calories)}</div><div class=\"muted\">planned calories / ${Math.round(num(state.goals.calorie_goal))} goal</div><div class=\"progress\"><span style=\"width:${progressPercent(stats.calories,num(state.goals.calorie_goal))}%\"></span></div></div><div><div class=\"big\">${Math.round(stats.protein)} g</div><div class=\"muted\">planned protein / ${Math.round(num(state.goals.protein_goal))} g goal</div><div class=\"progress\"><span style=\"width:${progressPercent(stats.protein,num(state.goals.protein_goal))}%\"></span></div></div></div><div class=\"status-note\">${esc(plannerReadiness(selected).label)} · Empty meal slots are suggestions, not requirements.</div><div class=\"actions planner-slot-actions\">${['Breakfast','Lunch','Dinner','Snack'].map(m=>`<button data-add-plan-meal=\"${m}\">+ ${m}</button>`).join('')}</div><div class=\"planned-meals-list\">${plans.length?plans.map(p=>{const t=state.templates.find(x=>Number(x.id)===Number(p.template_id));const es=templateEntries(p.template_id);const n=planStats([p]);return `<div class=\"planned-card\"><div class=\"meal-header\"><div><strong>${esc(p.meal_type)} · ${esc(t?.name||'Saved meal')}</strong><div class=\"muted\">${amount(p.servings_multiplier)}× · ${Math.round(n.calories)} cal · ${Math.round(n.protein)}g protein</div></div><div class=\"entry-actions\"><button data-log-plan=\"${p.id}\" class=\"primary\" ${p.planned_date>todayString()?'disabled':''}>Log</button><button data-remove-plan=\"${p.id}\" class=\"ghost\">Remove</button></div></div><div class=\"inline-note\">${es.map(e=>`${esc(e.food_name)} (${amount(num(e.servings)*num(p.servings_multiplier))} × ${esc(e.serving_size)})`).join(' · ')}</div></div>`;}).join(''):'<div class=\"empty\">No meals planned for this day yet.</div>'}</div><div class=\"actions\" style=\"margin-top:16px\"><button id=\"open-grocery-list\" class=\"primary\">Open Weekly Groceries</button></div></div>
-    <div class=\"card\" style=\"margin-top:14px\"><h2>Plan status for the week</h2><div class=\"grid grid-2\">${dates.map(d=>{const st=plannerReadiness(d),n=planStats(state.plannedMeals.filter(p=>p.planned_date===d));return `<div class=\"stat-row\"><div class=\"stat-top\"><strong>${esc(fmtShortDate(d))}</strong><span class=\"${st.cls}\">${esc(st.label)}</span></div><div class=\"muted\">${Math.round(n.calories)} cal · ${Math.round(n.protein)}g protein planned</div></div>`;}).join('')}</div></div>`;
-  $('planner-prev-week').onclick=()=>{state.plannerAnchor=shiftDate(weekStart,-7);state.plannerSelectedDate=state.plannerAnchor;renderPlanner();};
-  $('planner-next-week').onclick=()=>{state.plannerAnchor=shiftDate(weekStart,7);state.plannerSelectedDate=state.plannerAnchor;renderPlanner();};
-  $('planner-this-week').onclick=()=>{state.plannerAnchor=todayString();state.plannerSelectedDate=todayString();renderPlanner();};
-  document.querySelectorAll('[data-plan-day]').forEach(b=>b.onclick=()=>{state.plannerSelectedDate=b.dataset.planDay;renderPlanner();});
+  const selectedReadiness=plannerReadiness(selected);
+  const dayCards=dates.map((d,i)=>{
+    const dayPlans=state.plannedMeals.filter(p=>p.planned_date===d);
+    const n=planStats(dayPlans),st=plannerReadiness(d);
+    return `<button class="week-day ${d===selected?'active':''}" data-plan-day="${d}"><small>${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}</small><strong>${dateFromString(d).getDate()}</strong>${dayPlans.length?`<span class="week-day-calories">${Math.round(n.calories)} kcal</span><span class="week-day-protein">${Math.round(n.protein)} g P</span>`:'<span class="week-day-calories">No plan</span>'}<small class="${st.cls}">${esc(st.label)}</small></button>`;
+  }).join('');
+  const detailBlock=state.plannerDetailsExpanded ? (plans.length ? `<div class="grid grid-2 planner-goal-details"><div><strong>${Math.round(stats.calories)} / ${Math.round(num(state.goals.calorie_goal))} kcal</strong><div class="inline-note">${stats.calories>num(state.goals.calorie_goal)?`${Math.round(stats.calories-num(state.goals.calorie_goal))} kcal over goal`:stats.calories<num(state.goals.calorie_goal)?`${Math.round(num(state.goals.calorie_goal)-stats.calories)} kcal below goal`:'At calorie goal'}</div><div class="progress"><span style="width:${progressPercent(stats.calories,num(state.goals.calorie_goal))}%"></span></div></div><div><strong>${Math.round(stats.protein)} / ${Math.round(num(state.goals.protein_goal))} g protein</strong><div class="inline-note">${stats.protein<num(state.goals.protein_goal)?`${Math.round(num(state.goals.protein_goal)-stats.protein)} g below goal`:'Protein goal covered'}</div><div class="progress"><span style="width:${progressPercent(stats.protein,num(state.goals.protein_goal))}%"></span></div></div></div><div class="status-note">${stats.calories<num(state.goals.calorie_goal)&&stats.protein<num(state.goals.protein_goal)?'This plan is below both configured targets.':stats.calories<num(state.goals.calorie_goal)?'Planned calories are below your configured goal.':stats.protein<num(state.goals.protein_goal)?'Planned protein is below your configured goal.':stats.calories>num(state.goals.calorie_goal)?'Planned calories exceed your configured goal; review portions if needed.':'Your planned meals currently meet both configured targets.'}</div>` : '<div class="inline-note">Add a saved meal using the Breakfast, Lunch, Dinner, or Snack section below. Meal slots are optional.</div>') : '';
+  const mealCards=plans.length?plans.map(p=>{
+    const t=state.templates.find(x=>Number(x.id)===Number(p.template_id));
+    const es=templateEntries(p.template_id),n=planStats([p]);
+    return `<div class="planned-card"><div class="meal-header"><div><strong>${esc(p.meal_type)} · ${esc(t?.name||'Saved meal')}</strong><div class="muted">${amount(p.servings_multiplier)}× · ${Math.round(n.calories)} cal · ${Math.round(n.protein)}g protein</div></div><div class="entry-actions"><button data-log-plan="${p.id}" class="primary" ${p.planned_date>todayString()?'disabled':''}>Log</button><button data-remove-plan="${p.id}" class="ghost">Remove</button></div></div><div class="inline-note">${es.map(e=>`${esc(e.food_name)} (${amount(num(e.servings)*num(p.servings_multiplier))} × ${esc(e.serving_size)})`).join(' · ')}</div></div>`;
+  }).join(''):'<div class="empty">Nothing planned yet. Add a saved meal to one or more optional meal slots below.</div>';
+  $('planner-page').innerHTML=`
+    <div class="card"><div class="meal-header"><div><h2>Weekly Meal Planner</h2><div class="muted">${fmtShortDate(weekStart)} – ${fmtDate(weekEnd)}</div></div><div class="actions"><button id="planner-prev-week">‹ Week</button><button id="planner-this-week">This week</button><button id="planner-next-week">Week ›</button></div></div><div class="week-day-grid">${dayCards}</div></div>
+    <div class="card planner-selected-day" style="margin-top:14px"><div class="section-title" style="margin-top:0"><div><h2>${esc(fmtDate(selected))}</h2><div class="muted">${plans.length?`${plans.length} planned meal${plans.length===1?'':'s'} · ${Math.round(stats.calories)} kcal · ${Math.round(stats.protein)} g protein planned`:'No meals planned yet · Add one below'}</div></div><button class="primary" id="planner-add-meal">+ Add Meal</button></div><div class="planner-check-toggle"><span class="${selectedReadiness.cls}">${esc(selectedReadiness.label)}</span><button id="toggle-planner-details" class="ghost" aria-expanded="${state.plannerDetailsExpanded}">${state.plannerDetailsExpanded?'Hide details':'Details'}</button></div>${detailBlock}${state.plannerDetailsExpanded?`<div class="actions planner-slot-actions">${['Breakfast','Lunch','Dinner','Snack'].filter(m=>!plans.some(p=>p.meal_type===m)).map(m=>`<button data-add-plan-meal="${m}">+ ${m}</button>`).join('')}</div><div class="inline-note">Nutrition totals are estimates from saved meal portions and can differ from what you actually eat. Blank meal slots are suggestions, not requirements.</div>`:''}<div class="planned-meals-list">${mealCards}</div><div class="actions" style="margin-top:16px"><button id="open-grocery-list" class="primary">Open Weekly Groceries</button></div></div>
+    <div class="card" style="margin-top:14px"><h2>Plan status for the week</h2><div class="grid grid-2">${dates.map(d=>{const st=plannerReadiness(d),n=planStats(state.plannedMeals.filter(p=>p.planned_date===d));return `<div class="stat-row"><div class="stat-top"><strong>${esc(fmtShortDate(d))}</strong><span class="${st.cls}">${esc(st.label)}</span></div><div class="muted">${Math.round(n.calories)} cal · ${Math.round(n.protein)}g protein planned</div></div>`;}).join('')}</div></div>`;
+  $('planner-prev-week').onclick=()=>{state.plannerAnchor=shiftDate(weekStart,-7);state.plannerSelectedDate=state.plannerAnchor;state.plannerDetailsExpanded=false;renderPlanner();};
+  $('planner-next-week').onclick=()=>{state.plannerAnchor=shiftDate(weekStart,7);state.plannerSelectedDate=state.plannerAnchor;state.plannerDetailsExpanded=false;renderPlanner();};
+  $('planner-this-week').onclick=()=>{state.plannerAnchor=todayString();state.plannerSelectedDate=todayString();state.plannerDetailsExpanded=false;renderPlanner();};
+  document.querySelectorAll('[data-plan-day]').forEach(b=>b.onclick=()=>{state.plannerSelectedDate=b.dataset.planDay;state.plannerDetailsExpanded=false;renderPlanner();});
   $('planner-add-meal').onclick=()=>openPlanPicker(null);
+  $('toggle-planner-details').onclick=()=>{state.plannerDetailsExpanded=!state.plannerDetailsExpanded;renderPlanner();};
   document.querySelectorAll('[data-add-plan-meal]').forEach(b=>b.onclick=()=>openPlanPicker(b.dataset.addPlanMeal));
   document.querySelectorAll('[data-remove-plan]').forEach(b=>b.onclick=async()=>{try{await dbDelete('planned_meals',Number(b.dataset.removePlan));await loadAll();renderPlanner();showToast('Planned meal removed.');}catch(error){showToast(error.message,true);}});
   document.querySelectorAll('[data-log-plan]').forEach(b=>b.onclick=()=>logPlannedMeal(Number(b.dataset.logPlan)));
@@ -1559,8 +1601,20 @@ function renderPlanner(openGroceries=false){
 
 function openPlanPicker(mealType){
   if(!state.templates.length){showToast('Create a Saved Meal from Today before planning it.',true);return;}
-  openModal(`<div class=\"modal-header\"><h2>Add to Weekly Plan</h2><button class=\"ghost\" data-close>Close</button></div><form id=\"plan-picker-form\" class=\"modal-body\"><label>Meal slot<select name=\"meal_type\">${['Breakfast','Lunch','Dinner','Snack'].map(m=>`<option ${m===mealType?'selected':''}>${m}</option>`).join('')}</select></label><label>Saved meal<select name=\"template_id\" required>${state.templates.map(t=>`<option value=\"${t.id}\">${esc(t.name)} · ${esc(t.meal_type)}</option>`).join('')}</select></label><label>Portion multiplier<select name=\"servings_multiplier\"><option value=\"0.5\">0.5×</option><option value=\"1\" selected>1×</option><option value=\"1.5\">1.5×</option><option value=\"2\">2×</option></select></label><div class=\"muted\">Date: ${esc(fmtDate(state.plannerSelectedDate))}</div></form><div class=\"modal-footer\"><button class=\"ghost\" data-close>Cancel</button><button class=\"primary\" id=\"save-plan\">Add to plan</button></div>`);
-  $('save-plan').onclick=async()=>{const f=$('plan-picker-form');if(!f.reportValidity())return;const d=Object.fromEntries(new FormData(f));try{await dbInsert('planned_meals',{user_id:currentUser.id,template_id:Number(d.template_id),planned_date:state.plannerSelectedDate,meal_type:d.meal_type,servings_multiplier:num(d.servings_multiplier)||1});closeModal();await loadAll();renderPlanner();showToast('Meal added to weekly plan.');}catch(error){showToast(error.message,true);}};
+  const firstTemplate=state.templates[0];
+  openModal(`<div class="modal-header"><h2>Add to Weekly Plan</h2><button class="ghost" data-close>Close</button></div><form id="plan-picker-form" class="modal-body"><label>Meal slot<select name="meal_type">${['Breakfast','Lunch','Dinner','Snack'].map(m=>`<option ${m===mealType?'selected':''}>${m}</option>`).join('')}</select></label><label>Search saved meals<input id="plan-template-search" type="search" placeholder="Search saved meals…"></label><div id="plan-template-list" class="plan-template-list"></div><input type="hidden" name="template_id" id="plan-template-id" value="${firstTemplate.id}"><label>Portion size<select name="servings_multiplier"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><div class="muted">Date: ${esc(fmtDate(state.plannerSelectedDate))}</div></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="save-plan">Add to plan</button></div>`);
+  let selectedTemplateId=Number(firstTemplate.id);
+  const drawTemplates=()=>{
+    const q=$('plan-template-search').value.trim().toLowerCase();
+    const matches=state.templates.filter(t=>`${t.name||''} ${t.meal_type||''}`.toLowerCase().includes(q));
+    if(!matches.some(t=>Number(t.id)===selectedTemplateId))selectedTemplateId=Number(matches[0]?.id||0);
+    $('plan-template-id').value=String(selectedTemplateId||'');
+    $('plan-template-list').innerHTML=matches.length?matches.map(t=>`<label class="plan-template-option"><input type="radio" name="template_choice" value="${t.id}" ${Number(t.id)===selectedTemplateId?'checked':''}><span><strong>${esc(t.name)}</strong><small>${esc(t.meal_type)} · ${templateEntries(t.id).length} items</small></span></label>`).join(''):'<div class="empty">No saved meals match that search.</div>';
+    document.querySelectorAll('[name="template_choice"]').forEach(input=>input.onchange=()=>{selectedTemplateId=Number(input.value);$('plan-template-id').value=String(selectedTemplateId);});
+  };
+  $('plan-template-search').oninput=drawTemplates;
+  drawTemplates();
+  $('save-plan').onclick=async()=>{const f=$('plan-picker-form');if(!f.reportValidity())return;const d=Object.fromEntries(new FormData(f));if(!Number(d.template_id)){showToast('Choose a saved meal to add to the plan.',true);return;}try{await dbInsert('planned_meals',{user_id:currentUser.id,template_id:Number(d.template_id),planned_date:state.plannerSelectedDate,meal_type:d.meal_type,servings_multiplier:num(d.servings_multiplier)||1});closeModal();await loadAll();renderPlanner();showToast('Meal added to weekly plan.');}catch(error){showToast(error.message,true);}};
 }
 
 async function logPlannedMeal(id){const p=state.plannedMeals.find(x=>Number(x.id)===id);if(!p)return;if(p.planned_date>todayString()){showToast('A planned future meal cannot be logged yet.',true);return;}const es=templateEntries(p.template_id);if(!es.length){showToast('This saved meal has no food entries.',true);return;}try{const payload=es.map(e=>({user_id:currentUser.id,food_id:e.food_id||null,date:p.planned_date,meal_type:p.meal_type,servings:num(e.servings)*num(p.servings_multiplier),entry_type:e.entry_type||'FOOD',recipe_id:e.recipe_id||null,food_name:e.food_name,serving_size:e.serving_size,calories:e.calories,protein:e.protein,carbs:e.carbs,fat:e.fat,fiber:e.fiber}));const {error}=await supabaseClient.from('meal_entries').insert(payload);if(error)throw error;await dbDelete('planned_meals',id);selectedDate=p.planned_date;await loadAll();renderPlanner();showToast('Planned meal logged to diary.');}catch(error){showToast(error.message,true);}}

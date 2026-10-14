@@ -1,6 +1,6 @@
 # FoodTracker Cloud Edition — Android parity website
 
-FoodTracker is a static HTML/CSS/JavaScript app backed by Supabase Auth and PostgreSQL. The website uses the same Supabase project and account as the Android app. Updates made on the website are written directly to the cloud; unlike Android's Room database, the website has no separate local database to sync.
+FoodTracker is a static HTML/CSS/JavaScript app backed by Supabase Auth and PostgreSQL. The website uses the same Supabase project and account as the Android app. Website account creation and password changes require at least 8 characters, matching Android. Updates made on the website are written directly to the cloud; unlike Android's Room database, the website has no separate local database or offline write queue.
 
 ## Android features implemented in the website
 
@@ -15,6 +15,8 @@ FoodTracker is a static HTML/CSS/JavaScript app backed by Supabase Auth and Post
 - **Groceries:** generate a checklist from the selected week, combine matching foods, add recipe-ingredient snapshots and manual items, categorize, edit/remove, check off/uncheck, clear checks, share/copy, and print/save as PDF.
 - **Data portability:** JSON full backup export/import (including Android `FoodTracker.FullBackup` files), diary CSV, food-library CSV import/export, and daily/weekly nutrition reports that can be saved as PDFs.
 - Responsive layout, seven-tab bottom navigation, swipe navigation on touch screens, PWA manifest and service worker.
+
+For the detailed feature-by-feature comparison, validation scope and remaining platform/setup differences, see [`PARITY_AUDIT.md`](PARITY_AUDIT.md).
 
 ## Configuration
 
