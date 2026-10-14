@@ -14,6 +14,7 @@ FoodTracker is a static HTML/CSS/JavaScript app backed by Supabase Auth and Post
 - **Weekly planner:** Monday–Sunday navigation; planned meal templates and portion multipliers; planned calorie/protein estimates; day readiness status; quick-add by meal slot; log due planned meals or remove them.
 - **Groceries:** generate a checklist from the selected week, combine matching foods, add recipe-ingredient snapshots and manual items, categorize, edit/remove, check off/uncheck, clear checks, share/copy, and print/save as PDF.
 - **Data portability:** JSON full backup export/import (including Android `FoodTracker.FullBackup` files), diary CSV, food-library CSV import/export, and daily/weekly nutrition reports that can be saved as PDFs.
+- **Quality-of-life behavior:** remembers food-library search/filter/sort, expanded Quick Log and macro details, and the last-used meal on this browser; an Undo action appears after deleting a diary entry; Escape closes dialogs; and a clear warning appears when the browser goes offline because cloud edits are not queued locally.
 - Responsive layout, seven-tab bottom navigation, swipe navigation on touch screens, PWA manifest and service worker.
 
 For the detailed feature-by-feature comparison, validation scope and remaining platform/setup differences, see [`PARITY_AUDIT.md`](PARITY_AUDIT.md).

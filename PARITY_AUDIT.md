@@ -27,6 +27,15 @@
 | Full backup and restore | JSON backup export/import; Android `FoodTracker.FullBackup` reader; account/project checks; merge behavior | Android-backup import tested with a fixture covering diary, foods, recipes, meals, goals, planner and groceries. Website import merges instead of deleting existing cloud data. |
 | Refresh/sync data | Settings → Refresh Cloud Data; shared Supabase account | Refresh flow checked against a mocked cloud. Live sync was not tested. |
 
+## Additional quality-of-life improvements in the latest update
+
+- Food-library search, selected filter/sort, Quick Log expansion, macro-detail expansion, and last-used meal preference persist locally in this browser. Only UI preferences are stored; diary data remains in Supabase.
+- Logging dialogs start with the last meal selected by the user while meal-specific buttons and saved-meal meal slots keep their explicit destinations.
+- Deleting a diary entry offers a short-lived **Undo** action. Restoring creates a new cloud entry with the same logged nutrition values and date; the database's original identity/timestamp is not reused.
+- The browser shows a visible offline warning because cloud writes are not queued. When the connection returns, it prompts the user to refresh Cloud Data for the latest changes.
+- Pressing **Escape** closes an open dialog, and toast announcements are marked as a live status region for assistive technology.
+- The service-worker cache was versioned forward so the changes are picked up after reload/update.
+
 ## Validation performed
 
 - JavaScript syntax checks for `app.js` and `sw.js`.
@@ -34,12 +43,12 @@
 - Food database review, serving calculations, destination-meal selection, save and log.
 - Recipe create/ingredient/preserve-form/log flows; saved-meal search, details, destination and portion multiplier.
 - CSV import preview and Android full-backup import/merge.
-- Diary date jump, per-meal totals, Quick Log grouping, food search persistence, Today date for Foods/Recipes logging.
+- Diary date jump, per-meal totals, Quick Log grouping, food search persistence, and Today date for Foods/Recipes logging.
 - Goal edits, weekly planner search/portion/logging, grocery checklist state and manual item creation.
 - Edge Function mock tests for per-100g serving conversion, short-query validation, missing-secret handling and CORS preflight.
 - Mobile viewport smoke test at 390 px wide, including horizontal-overflow checks for the Today, Planner and Goals screens.
 
-All of the above simulated checks passed. They are not a substitute for a live authenticated Supabase session.
+The earlier simulated checks passed, and the latest quality-of-life changes passed JavaScript syntax and static HTML/CSS/asset-integrity checks. They are not a substitute for a live authenticated Supabase session.
 
 ## Differences and required setup still to be aware of
 

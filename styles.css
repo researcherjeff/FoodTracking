@@ -88,7 +88,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .modal-body { display:grid; gap: 12px; }
 .modal-footer { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .toast-root { position:fixed; top:18px; right:18px; z-index:200; display:grid; gap:8px; width:min(360px,calc(100% - 36px)); }
-.toast { background:var(--panel); border:1px solid var(--border); border-left:4px solid var(--red); border-radius:12px; padding:12px 14px; box-shadow:var(--shadow); }
+.toast { display:flex; align-items:center; justify-content:space-between; gap:12px; background:var(--panel); border:1px solid var(--border); border-left:4px solid var(--red); border-radius:12px; padding:12px 14px; box-shadow:var(--shadow); }
+.toast-message { flex:1; min-width:0; overflow-wrap:anywhere; }
+.toast-action { flex:0 0 auto; padding:7px 10px; color:#fff; background:rgba(229,74,74,.17); border:1px solid rgba(229,74,74,.42); }
+.connection-banner { position:sticky; top:86px; z-index:19; margin:0; padding:11px clamp(16px,3vw,36px); color:#ffe2ad; background:#332715; border-bottom:1px solid rgba(244,200,106,.32); font-size:.88rem; line-height:1.4; }
 .inline-note { color:var(--muted); font-size:.83rem; }
 .two-col-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 @media (max-width: 760px) {
@@ -283,3 +286,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
   .week-day-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
   .week-day-calories,.week-day-protein { font-size:.73rem; }
 }
+
+
+/* Small usability improvements: clear offline status and actionable toasts. */
+@media (max-width:760px) { .connection-banner { top:76px; padding:10px 14px; } }

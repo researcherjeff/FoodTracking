@@ -13,6 +13,16 @@ let currentUser = null;
 let activeTab = 'today';
 let selectedDate = localDateString(new Date());
 
+const UI_PREFERENCES_KEY = 'foodtracker-ui-preferences-v1';
+const VALID_MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+function readUiPreferences() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) || '{}');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch (_) { return {}; }
+}
+const savedUiPreferences = readUiPreferences();
+
 const state = {
   foods: [],
   entries: [],
@@ -28,11 +38,11 @@ const state = {
   plannerAvailable: false,
   groceryAvailable: false,
   featureErrors: {},
-  showMoreNutrition: false,
-  quickLogExpanded: false,
-  foodFilter: 'all',
-  foodSort: 'name',
-  foodSearch: '',
+  showMoreNutrition: savedUiPreferences.showMoreNutrition === true,
+  quickLogExpanded: savedUiPreferences.quickLogExpanded === true,
+  foodFilter: ['all','favorites','recent'].includes(savedUiPreferences.foodFilter) ? savedUiPreferences.foodFilter : 'all',
+  foodSort: ['name','calories-asc','calories-desc','protein-desc','carbs-asc'].includes(savedUiPreferences.foodSort) ? savedUiPreferences.foodSort : 'name',
+  foodSearch: typeof savedUiPreferences.foodSearch === 'string' ? savedUiPreferences.foodSearch.slice(0, 200) : '',
   plannerDetailsExpanded: false,
   historyRange: 7,
   plannerAnchor: localDateString(new Date()),
@@ -40,6 +50,25 @@ const state = {
   groceryCategory: 'All',
   lastCloudRefresh: null
 };
+
+let preferredMeal = VALID_MEALS.includes(savedUiPreferences.lastUsedMeal) ? savedUiPreferences.lastUsedMeal : 'Dinner';
+function persistUiPreferences() {
+  try {
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      showMoreNutrition: state.showMoreNutrition,
+      quickLogExpanded: state.quickLogExpanded,
+      foodFilter: state.foodFilter,
+      foodSort: state.foodSort,
+      foodSearch: state.foodSearch,
+      lastUsedMeal: preferredMeal
+    }));
+  } catch (_) { /* Preferences are optional; private browsing may block local storage. */ }
+}
+function rememberMeal(meal) {
+  if (!VALID_MEALS.includes(meal)) return;
+  preferredMeal = meal;
+  persistUiPreferences();
+}
 
 const $ = id => document.getElementById(id);
 
@@ -152,13 +181,49 @@ function total(entries, key) {
   return entries.reduce((sum, entry) => sum + num(entry[key]) * num(entry.servings), 0);
 }
 
-function showToast(message, error = false) {
+function showToast(message, error = false, action = null, duration = 3500) {
   const toast = document.createElement('div');
   toast.className = 'toast';
   if (error) toast.style.borderLeftColor = '#ff7777';
-  toast.textContent = message;
+  const text = document.createElement('span');
+  text.className = 'toast-message';
+  text.textContent = message;
+  toast.appendChild(text);
+  if (action && typeof action.onClick === 'function') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'toast-action';
+    button.textContent = action.label || 'Undo';
+    button.setAttribute('aria-label', action.label || 'Undo last action');
+    button.onclick = async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = 'Working…';
+      try {
+        await action.onClick();
+        toast.remove();
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = action.label || 'Undo';
+        showToast(err?.message || 'That action could not be undone.', true);
+      }
+    };
+    toast.appendChild(button);
+  }
   $('toast-root').appendChild(toast);
-  window.setTimeout(() => toast.remove(), 3500);
+  window.setTimeout(() => toast.remove(), Math.max(1500, duration));
+}
+
+function updateConnectionStatus(online = navigator.onLine) {
+  const banner = $('connection-banner');
+  if (!banner) return;
+  if (online) {
+    banner.classList.add('hidden');
+    banner.textContent = '';
+    return;
+  }
+  banner.textContent = 'You are offline. FoodTracker needs an internet connection to load or save cloud data. Changes are not queued for later sync.';
+  banner.classList.remove('hidden');
 }
 
 let authViewMode = 'login';
@@ -445,14 +510,14 @@ function renderToday() {
   $('next-day').onclick=()=>{if(selectedDate<todayString()){selectedDate=shiftDate(selectedDate,1);renderToday();}};
   $('date-picker').onchange=e=>{if(e.target.value){selectedDate=e.target.value;renderToday();}};
   $('jump-today')?.addEventListener('click',()=>{selectedDate=todayString();renderToday();});
-  $('add-food-today').onclick=()=>openAddFoodModal(selectedDate, 'Dinner');
+  $('add-food-today').onclick=()=>openAddFoodModal(selectedDate, preferredMeal);
   document.querySelectorAll('[data-add-food-meal]').forEach(b=>b.onclick=()=>openAddFoodModal(selectedDate,b.dataset.addFoodMeal));
   $('saved-meals-btn').onclick=()=>openSavedMealsModal();
   $('weekly-planner-btn').onclick=()=>{state.plannerAnchor=selectedDate;state.plannerSelectedDate=selectedDate;navigate('planner');};
   $('open-groceries-btn').onclick=()=>{state.plannerAnchor=selectedDate;state.plannerSelectedDate=selectedDate;navigate('planner');renderPlanner(true);};
-  $('toggle-more-nutrition')?.addEventListener('click',()=>{state.showMoreNutrition=!state.showMoreNutrition;renderToday();});
+  $('toggle-more-nutrition')?.addEventListener('click',()=>{state.showMoreNutrition=!state.showMoreNutrition;persistUiPreferences();renderToday();});
   $('open-goals-from-today')?.addEventListener('click',()=>navigate('goals'));
-  $('toggle-quick-log').onclick=()=>{state.quickLogExpanded=!state.quickLogExpanded;renderToday();};
+  $('toggle-quick-log').onclick=()=>{state.quickLogExpanded=!state.quickLogExpanded;persistUiPreferences();renderToday();};
   if($('copy-day-btn'))$('copy-day-btn').onclick=()=>openCopyModal(null);
   document.querySelectorAll('[data-quick-food]').forEach(b=>b.onclick=()=>openLogFoodModal(Number(b.dataset.quickFood),selectedDate));
   document.querySelectorAll('[data-edit-entry]').forEach(b=>b.onclick=()=>openEditEntryModal(Number(b.dataset.editEntry)));
@@ -515,9 +580,9 @@ function renderFoods() {
     document.querySelectorAll('[data-food-delete]').forEach(b=>b.onclick=()=>confirmDeleteFood(Number(b.dataset.foodDelete)));
     document.querySelectorAll('[data-food-duplicate]').forEach(b=>b.onclick=()=>duplicateFood(Number(b.dataset.foodDuplicate)));
   };
-  $('food-search').oninput=e=>{state.foodSearch=e.target.value;draw();};
-  $('food-sort').onchange=e=>{state.foodSort=e.target.value;draw();window.scrollTo({top:0,behavior:'smooth'});};
-  document.querySelectorAll('[data-food-filter]').forEach(b=>b.onclick=()=>{state.foodFilter=b.dataset.foodFilter;renderFoods();});
+  $('food-search').oninput=e=>{state.foodSearch=e.target.value;persistUiPreferences();draw();};
+  $('food-sort').onchange=e=>{state.foodSort=e.target.value;persistUiPreferences();draw();window.scrollTo({top:0,behavior:'smooth'});};
+  document.querySelectorAll('[data-food-filter]').forEach(b=>b.onclick=()=>{state.foodFilter=b.dataset.foodFilter;persistUiPreferences();renderFoods();});
   $('new-food-btn').onclick=()=>openFoodEditModal(null);
   $('food-database-btn').onclick=openFoodDatabaseSearchModal;
   $('export-foods-csv').onclick=exportFoodsCsv;
@@ -661,9 +726,10 @@ function renderSettings() {
   };
 }
 
-async function openAddFoodModal(date, initialMeal = 'Dinner') {
-  const meal = ['Breakfast','Lunch','Dinner','Snack'].includes(initialMeal) ? initialMeal : 'Dinner';
+async function openAddFoodModal(date, initialMeal = preferredMeal) {
+  const meal = VALID_MEALS.includes(initialMeal) ? initialMeal : preferredMeal;
   openModal(`<div class="modal-header"><h2>Add Food to ${esc(meal)}</h2><button class="ghost" data-close>Close</button></div><form id="add-food-form" class="modal-body"><label>Food name<input name="name" required></label><label>Serving size<input name="serving_size" placeholder="Examples: 4 oz, 150 g, 1 slice" required></label><div class="two-col-form"><label>Calories<input name="calories" type="number" min="0" step="1" required></label><label>Protein (g)<input name="protein" type="number" min="0" step="0.1" required></label><label>Carbs (g)<input name="carbs" type="number" min="0" step="0.1" required></label><label>Fat (g)<input name="fat" type="number" min="0" step="0.1" required></label><label>Fiber (g)<input name="fiber" type="number" min="0" step="0.1" required></label><label>Servings to log<input name="servings" type="number" min="0.01" step="0.25" value="1" required></label></div><label>Meal<select name="meal_type">${['Breakfast','Lunch','Dinner','Snack'].map(m=>`<option ${m===meal?'selected':''}>${m}</option>`).join('')}</select></label></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="add-food-submit">Save & Log</button></div>`);
+  $('add-food-form').elements.meal_type.onchange = event => rememberMeal(event.target.value);
   $('add-food-submit').onclick = async () => {
     const form = $('add-food-form');
     if (!form.reportValidity()) return;
@@ -671,7 +737,7 @@ async function openAddFoodModal(date, initialMeal = 'Dinner') {
     try {
       const food = await dbInsert('foods', { user_id:currentUser.id, name:data.name.trim(), serving_size:data.serving_size.trim(), calories:num(data.calories), protein:num(data.protein), carbs:num(data.carbs), fat:num(data.fat), fiber:num(data.fiber) });
       await dbInsert('meal_entries', { user_id:currentUser.id, food_id:food.id, date, meal_type:data.meal_type, servings:Math.max(num(data.servings),.01), entry_type:'FOOD', recipe_id:null, food_name:food.name, serving_size:food.serving_size, calories:food.calories, protein:food.protein, carbs:food.carbs, fat:food.fat, fiber:food.fiber });
-      closeModal(); await loadAll(); renderCurrentPage(); showToast(`Food added to ${fmtDate(date)}.`);
+      rememberMeal(data.meal_type); closeModal(); await loadAll(); renderCurrentPage(); showToast(`Food added to ${fmtDate(date)}.`);
     } catch (error) { showToast(error.message, true); }
   };
 }
@@ -706,8 +772,38 @@ async function confirmDeleteFood(id) {
 }
 
 async function confirmDeleteEntry(id) {
-  if (!confirm('Delete this meal entry?')) return;
-  try { await dbDelete('meal_entries', id); await loadAll(); renderCurrentPage(); showToast('Entry deleted.'); } catch (error) { showToast(error.message, true); }
+  const entry = state.entries.find(item => String(item.id) === String(id));
+  if (!entry || !confirm(`Delete ${entry.food_name || 'this meal entry'}? You can undo this for a few seconds.`)) return;
+  try {
+    await dbDelete('meal_entries', id);
+    await loadAll();
+    renderCurrentPage();
+    const snapshot = {
+      user_id: currentUser.id,
+      food_id: entry.food_id != null && state.foods.some(food => String(food.id) === String(entry.food_id)) ? entry.food_id : null,
+      date: entry.date,
+      meal_type: entry.meal_type,
+      servings: entry.servings,
+      entry_type: entry.entry_type || 'FOOD',
+      recipe_id: entry.recipe_id ?? null,
+      food_name: entry.food_name,
+      serving_size: entry.serving_size,
+      calories: entry.calories,
+      protein: entry.protein,
+      carbs: entry.carbs,
+      fat: entry.fat,
+      fiber: entry.fiber
+    };
+    showToast('Entry deleted.', false, {
+      label: 'Undo',
+      onClick: async () => {
+        await dbInsert('meal_entries', snapshot);
+        await loadAll();
+        renderCurrentPage();
+        showToast('Entry restored.');
+      }
+    }, 7000);
+  } catch (error) { showToast(error.message, true); }
 }
 
 function parseServing(servingSize) {
@@ -719,12 +815,13 @@ function parseServing(servingSize) {
 async function openLogFoodModal(foodId, date) {
   const food = state.foods.find(f => f.id === foodId); if (!food) return;
   const parsed = parseServing(food.serving_size);
-  openModal(`<div class="modal-header"><h2>Log Food</h2><button class="ghost" data-close>Close</button></div><form id="log-food-form" class="modal-body"><div><h3>${esc(food.name)}</h3><div class="muted">1 serving = ${esc(food.serving_size)}</div></div><label>Meal<select name="meal_type"><option>Breakfast</option><option>Lunch</option><option selected>Dinner</option><option>Snack</option></select></label><label>Amount eaten (${esc(parsed.unit)})<input id="food-amount" name="amount" type="number" min="0.01" step="0.01" value="${parsed.amount}" required></label><div class="actions">${[0.5,1,1.5,2].map(m=>`<button type="button" data-amount-mult="${m}">${m}×</button>`).join('')}</div><div id="food-preview" class="card"></div></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="log-food-submit">Log Food</button></div>`);
+  openModal(`<div class="modal-header"><h2>Log Food</h2><button class="ghost" data-close>Close</button></div><form id="log-food-form" class="modal-body"><div><h3>${esc(food.name)}</h3><div class="muted">1 serving = ${esc(food.serving_size)}</div></div><label>Meal<select name="meal_type">${VALID_MEALS.map(m=>`<option ${m===preferredMeal?'selected':''}>${m}</option>`).join('')}</select></label><label>Amount eaten (${esc(parsed.unit)})<input id="food-amount" name="amount" type="number" min="0.01" step="0.01" value="${parsed.amount}" required></label><div class="actions">${[0.5,1,1.5,2].map(m=>`<button type="button" data-amount-mult="${m}">${m}×</button>`).join('')}</div><div id="food-preview" class="card"></div></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="log-food-submit">Log Food</button></div>`);
   const updatePreview = () => { const servings = parsed.amount > 0 ? num($('food-amount').value) / parsed.amount : 0; $('food-preview').innerHTML = `<strong>${Math.round(food.calories*servings)} calories</strong><div class="muted">${Math.round(food.protein*servings)}g protein • ${Math.round(food.carbs*servings)}g carbs • ${Math.round(food.fat*servings)}g fat • ${Math.round(food.fiber*servings)}g fiber</div>`; };
   $('food-amount').oninput = updatePreview;
+  $('log-food-form').elements.meal_type.onchange = event => rememberMeal(event.target.value);
   document.querySelectorAll('[data-amount-mult]').forEach(button => button.onclick = () => { $('food-amount').value = amount(parsed.amount * num(button.dataset.amountMult)); updatePreview(); });
   updatePreview();
-  $('log-food-submit').onclick = async () => { const form=$('log-food-form'); if(!form.reportValidity())return; const data=Object.fromEntries(new FormData(form)); const servings=parsed.amount>0?num(data.amount)/parsed.amount:1; try{await dbInsert('meal_entries',{user_id:currentUser.id,food_id:food.id,date,meal_type:data.meal_type,servings:Math.max(servings,.01),entry_type:'FOOD',recipe_id:null,food_name:food.name,serving_size:food.serving_size,calories:food.calories,protein:food.protein,carbs:food.carbs,fat:food.fat,fiber:food.fiber});closeModal();await loadAll();renderCurrentPage();showToast(`Logged to ${fmtDate(date)}.`);}catch(error){showToast(error.message,true);} };
+  $('log-food-submit').onclick = async () => { const form=$('log-food-form'); if(!form.reportValidity())return; const data=Object.fromEntries(new FormData(form)); const servings=parsed.amount>0?num(data.amount)/parsed.amount:1; try{await dbInsert('meal_entries',{user_id:currentUser.id,food_id:food.id,date,meal_type:data.meal_type,servings:Math.max(servings,.01),entry_type:'FOOD',recipe_id:null,food_name:food.name,serving_size:food.serving_size,calories:food.calories,protein:food.protein,carbs:food.carbs,fat:food.fat,fiber:food.fiber});rememberMeal(data.meal_type);closeModal();await loadAll();renderCurrentPage();showToast(`Logged to ${fmtDate(date)}.`);}catch(error){showToast(error.message,true);} };
 }
 
 async function openEditEntryModal(id) {
@@ -733,7 +830,7 @@ async function openEditEntryModal(id) {
   openModal(`<div class="modal-header"><h2>Edit Food Entry</h2><button class="ghost" data-close>Close</button></div><form id="edit-entry-form" class="modal-body"><div><h3>${esc(entry.food_name)}</h3><div class="muted">${fmtDate(entry.date)} • ${esc(entry.serving_size)}</div></div><label>Meal<select name="meal_type">${['Breakfast','Lunch','Dinner','Snack'].map(m=>`<option ${m===entry.meal_type?'selected':''}>${m}</option>`).join('')}</select></label><label>Amount eaten (${esc(parsed.unit)})<input name="amount" type="number" min="0.01" step="0.01" value="${amount(parsed.amount*num(entry.servings))}" required></label><div id="edit-entry-preview" class="card"></div></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="edit-entry-submit">Save Changes</button></div>`);
   const preview = () => { const s=parsed.amount>0?num(document.querySelector('#edit-entry-form [name="amount"]').value)/parsed.amount:0; $('edit-entry-preview').innerHTML=`<strong>${Math.round(entry.calories*s)} calories</strong><div class="muted">${Math.round(entry.protein*s)}g protein • ${Math.round(entry.carbs*s)}g carbs • ${Math.round(entry.fat*s)}g fat • ${Math.round(entry.fiber*s)}g fiber</div>`; };
   document.querySelector('#edit-entry-form [name="amount"]').oninput=preview; preview();
-  $('edit-entry-submit').onclick=async()=>{const form=$('edit-entry-form');if(!form.reportValidity())return;const data=Object.fromEntries(new FormData(form));const s=parsed.amount>0?num(data.amount)/parsed.amount:1;try{await dbUpsert('meal_entries',{...entry,user_id:currentUser.id,meal_type:data.meal_type,servings:Math.max(s,.01)});closeModal();await loadAll();renderCurrentPage();showToast('Entry updated.');}catch(error){showToast(error.message,true);}};
+  $('edit-entry-submit').onclick=async()=>{const form=$('edit-entry-form');if(!form.reportValidity())return;const data=Object.fromEntries(new FormData(form));const s=parsed.amount>0?num(data.amount)/parsed.amount:1;try{await dbUpsert('meal_entries',{...entry,user_id:currentUser.id,meal_type:data.meal_type,servings:Math.max(s,.01)});rememberMeal(data.meal_type);closeModal();await loadAll();renderCurrentPage();showToast('Entry updated.');}catch(error){showToast(error.message,true);}};
 }
 
 function openSaveMealModal(mealType) {
@@ -805,13 +902,13 @@ async function logTemplate(templateId, destinationMealType = null, servingsMulti
   if (!template) return;
   const entries=state.templateEntries.filter(e=>Number(e.template_id)===Number(templateId));
   if(!entries.length){showToast('This saved meal has no entries.',true);return;}
-  const mealType = destinationMealType || template.meal_type || 'Dinner';
+  const mealType = destinationMealType || template.meal_type || preferredMeal;
   const multiplier = Math.max(0.01, num(servingsMultiplier) || 1);
   try {
     const rows=entries.map(e=>({user_id:currentUser.id,food_id:e.food_id||null,date:selectedDate,meal_type:mealType,servings:num(e.servings)*multiplier,entry_type:e.entry_type||'FOOD',recipe_id:e.recipe_id||null,food_name:e.food_name,serving_size:e.serving_size,calories:e.calories,protein:e.protein,carbs:e.carbs,fat:e.fat,fiber:e.fiber}));
     const {error}=await supabaseClient.from('meal_entries').insert(rows);
     if(error)throw error;
-    closeModal();await loadAll();renderToday();showToast(`${template.name} logged to ${mealType} (${amount(multiplier)}×).`);
+    rememberMeal(mealType);closeModal();await loadAll();renderToday();showToast(`${template.name} logged to ${mealType} (${amount(multiplier)}×).`);
   } catch(error) { showToast(error.message,true); }
 }
 
@@ -860,7 +957,7 @@ function openFoodPicker(ingredients, returnToRecipe) {
   openModal(`<div class="modal-header"><h2>Choose Food</h2><button class="ghost" data-close>Close</button></div><div class="modal-body"><input id="picker-search" placeholder="Search foods..."><div id="picker-list"></div></div>`);
   const draw=()=>{const q=$('picker-search').value.trim().toLowerCase();const filtered=state.foods.filter(f=>f.name.toLowerCase().includes(q));$('picker-list').innerHTML=filtered.length?filtered.map(f=>`<div class="entry" data-picker-food="${f.id}"><div class="entry-main"><strong>${esc(f.name)}</strong><div class="muted">${esc(f.serving_size)} • ${Math.round(num(f.calories))} cal</div></div><button>Select</button></div>`).join(''):'<div class="empty">No foods found.</div>';document.querySelectorAll('[data-picker-food]').forEach(row=>row.onclick=()=>{const food=state.foods.find(f=>f.id===Number(row.dataset.pickerFood));closeModal();previous.push({food_id:food.id,food_name:food.name,serving_size:food.serving_size,calories:food.calories,protein:food.protein,carbs:food.carbs,fat:food.fat,fiber:food.fiber,quantity:1});returnToRecipe(previous);});};$('picker-search').oninput=draw;draw();}
 
-async function openRecipeLogModal(id){const recipe=state.recipes.find(r=>r.id===id);if(!recipe)return;const nutrition=recipeNutrition(id);openModal(`<div class="modal-header"><h2>Log Recipe</h2><button class="ghost" data-close>Close</button></div><form id="recipe-log-form" class="modal-body"><h3>${esc(recipe.name)}</h3><div class="muted">${Math.round(nutrition.calories)} calories per serving</div><label>Meal<select name="meal_type"><option>Breakfast</option><option>Lunch</option><option selected>Dinner</option><option>Snack</option></select></label><label>Servings eaten<input name="servings" type="number" min="0.25" step="0.25" value="1" required></label><div class="card"><strong id="recipe-log-preview">${Math.round(nutrition.calories)} calories</strong><div class="muted">${Math.round(nutrition.protein)}g protein • ${Math.round(nutrition.carbs)}g carbs • ${Math.round(nutrition.fat)}g fat • ${Math.round(nutrition.fiber)}g fiber</div></div></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="recipe-log-submit">Log Recipe</button></div>`);document.querySelector('#recipe-log-form [name="servings"]').oninput=()=>{const s=Math.max(num(document.querySelector('#recipe-log-form [name="servings"]').value),0);$('recipe-log-preview').textContent=`${Math.round(nutrition.calories*s)} calories`;};$('recipe-log-submit').onclick=async()=>{const form=$('recipe-log-form');if(!form.reportValidity())return;const data=Object.fromEntries(new FormData(form));const servings=Math.max(num(data.servings),.25);try{await dbInsert('meal_entries',{user_id:currentUser.id,date:todayString(),meal_type:data.meal_type,servings,entry_type:'RECIPE',food_id:null,recipe_id:recipe.id,food_name:recipe.name,serving_size:'1 recipe serving',calories:nutrition.calories,protein:nutrition.protein,carbs:nutrition.carbs,fat:nutrition.fat,fiber:nutrition.fiber});closeModal();await loadAll();renderCurrentPage();showToast(`Recipe logged to ${fmtDate(todayString())}.`);}catch(error){showToast(error.message,true);}};}
+async function openRecipeLogModal(id){const recipe=state.recipes.find(r=>r.id===id);if(!recipe)return;const nutrition=recipeNutrition(id);openModal(`<div class="modal-header"><h2>Log Recipe</h2><button class="ghost" data-close>Close</button></div><form id="recipe-log-form" class="modal-body"><h3>${esc(recipe.name)}</h3><div class="muted">${Math.round(nutrition.calories)} calories per serving</div><label>Meal<select name="meal_type">${VALID_MEALS.map(m=>`<option ${m===preferredMeal?'selected':''}>${m}</option>`).join('')}</select></label><label>Servings eaten<input name="servings" type="number" min="0.25" step="0.25" value="1" required></label><div class="card"><strong id="recipe-log-preview">${Math.round(nutrition.calories)} calories</strong><div class="muted">${Math.round(nutrition.protein)}g protein • ${Math.round(nutrition.carbs)}g carbs • ${Math.round(nutrition.fat)}g fat • ${Math.round(nutrition.fiber)}g fiber</div></div></form><div class="modal-footer"><button class="ghost" data-close>Cancel</button><button class="primary" id="recipe-log-submit">Log Recipe</button></div>`);document.querySelector('#recipe-log-form [name="servings"]').oninput=()=>{const s=Math.max(num(document.querySelector('#recipe-log-form [name="servings"]').value),0);$('recipe-log-preview').textContent=`${Math.round(nutrition.calories*s)} calories`;};document.querySelector('#recipe-log-form [name="meal_type"]').onchange=e=>rememberMeal(e.target.value);$('recipe-log-submit').onclick=async()=>{const form=$('recipe-log-form');if(!form.reportValidity())return;const data=Object.fromEntries(new FormData(form));const servings=Math.max(num(data.servings),.25);try{await dbInsert('meal_entries',{user_id:currentUser.id,date:todayString(),meal_type:data.meal_type,servings,entry_type:'RECIPE',food_id:null,recipe_id:recipe.id,food_name:recipe.name,serving_size:'1 recipe serving',calories:nutrition.calories,protein:nutrition.protein,carbs:nutrition.carbs,fat:nutrition.fat,fiber:nutrition.fiber});rememberMeal(data.meal_type);closeModal();await loadAll();renderCurrentPage();showToast(`Recipe logged to ${fmtDate(todayString())}.`);}catch(error){showToast(error.message,true);}};}
 
 async function confirmDeleteRecipe(id){const recipe=state.recipes.find(r=>r.id===id);if(!recipe||!confirm(`Delete ${recipe.name}? Existing history remains.`))return;try{const {error:a}=await supabaseClient.from('recipe_ingredients').delete().eq('recipe_id',id);if(a)throw a;const {error:b}=await supabaseClient.from('recipes').delete().eq('id',id);if(b)throw b;await loadAll();renderRecipes();showToast('Recipe deleted.');}catch(error){showToast(error.message,true);}}
 
@@ -1195,6 +1292,18 @@ async function initAuth() {
 }
 
 function setupEvents() {
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && $('modal-root')?.innerHTML.trim()) {
+      event.preventDefault();
+      closeModal();
+    }
+  });
+  window.addEventListener('offline', () => updateConnectionStatus(false));
+  window.addEventListener('online', () => {
+    updateConnectionStatus(true);
+    if (currentUser) showToast('Connection restored. Refresh Cloud Data in Settings to load the latest updates.');
+  });
+  updateConnectionStatus();
   document.querySelectorAll('.nav-btn').forEach(button => {
     button.onclick = () => navigate(button.dataset.tab);
   });
@@ -1617,7 +1726,7 @@ function openPlanPicker(mealType){
   $('save-plan').onclick=async()=>{const f=$('plan-picker-form');if(!f.reportValidity())return;const d=Object.fromEntries(new FormData(f));if(!Number(d.template_id)){showToast('Choose a saved meal to add to the plan.',true);return;}try{await dbInsert('planned_meals',{user_id:currentUser.id,template_id:Number(d.template_id),planned_date:state.plannerSelectedDate,meal_type:d.meal_type,servings_multiplier:num(d.servings_multiplier)||1});closeModal();await loadAll();renderPlanner();showToast('Meal added to weekly plan.');}catch(error){showToast(error.message,true);}};
 }
 
-async function logPlannedMeal(id){const p=state.plannedMeals.find(x=>Number(x.id)===id);if(!p)return;if(p.planned_date>todayString()){showToast('A planned future meal cannot be logged yet.',true);return;}const es=templateEntries(p.template_id);if(!es.length){showToast('This saved meal has no food entries.',true);return;}try{const payload=es.map(e=>({user_id:currentUser.id,food_id:e.food_id||null,date:p.planned_date,meal_type:p.meal_type,servings:num(e.servings)*num(p.servings_multiplier),entry_type:e.entry_type||'FOOD',recipe_id:e.recipe_id||null,food_name:e.food_name,serving_size:e.serving_size,calories:e.calories,protein:e.protein,carbs:e.carbs,fat:e.fat,fiber:e.fiber}));const {error}=await supabaseClient.from('meal_entries').insert(payload);if(error)throw error;await dbDelete('planned_meals',id);selectedDate=p.planned_date;await loadAll();renderPlanner();showToast('Planned meal logged to diary.');}catch(error){showToast(error.message,true);}}
+async function logPlannedMeal(id){const p=state.plannedMeals.find(x=>Number(x.id)===id);if(!p)return;if(p.planned_date>todayString()){showToast('A planned future meal cannot be logged yet.',true);return;}const es=templateEntries(p.template_id);if(!es.length){showToast('This saved meal has no food entries.',true);return;}try{const payload=es.map(e=>({user_id:currentUser.id,food_id:e.food_id||null,date:p.planned_date,meal_type:p.meal_type,servings:num(e.servings)*num(p.servings_multiplier),entry_type:e.entry_type||'FOOD',recipe_id:e.recipe_id||null,food_name:e.food_name,serving_size:e.serving_size,calories:e.calories,protein:e.protein,carbs:e.carbs,fat:e.fat,fiber:e.fiber}));const {error}=await supabaseClient.from('meal_entries').insert(payload);if(error)throw error;await dbDelete('planned_meals',id);rememberMeal(p.meal_type);selectedDate=p.planned_date;await loadAll();renderPlanner();showToast('Planned meal logged to diary.');}catch(error){showToast(error.message,true);}}
 
 // ---------- Android parity: grocery lists ----------
 const groceryCategories=['Produce','Meat & Seafood','Dairy & Eggs','Frozen','Bakery','Pantry','Other'];
@@ -1682,7 +1791,7 @@ async function openFoodDatabaseSearchModal() {
   let hasSearched = false;
   let errorText = '';
   let servingsText = '1';
-  let selectedMeal = 'Lunch';
+  let selectedMeal = preferredMeal;
   let saving = false;
 
   openModal('<div id="food-db-panel"></div>');
@@ -1718,7 +1827,7 @@ async function openFoodDatabaseSearchModal() {
         $('food-db-live-preview').innerHTML = previewMarkup(f);
         $('food-db-save-log').disabled = saving || !numericServings();
       };
-      $('food-db-meal').onchange = e => { selectedMeal = e.target.value; };
+      $('food-db-meal').onchange = e => { selectedMeal = e.target.value; rememberMeal(selectedMeal); };
       $('food-db-save-only').onclick = () => saveSearchedFood(false);
       $('food-db-save-log').onclick = () => saveSearchedFood(true);
       return;
@@ -1747,7 +1856,7 @@ async function openFoodDatabaseSearchModal() {
     $('food-db-query').addEventListener('input', () => { errorText = ''; });
     document.querySelectorAll('[data-review-food]').forEach(button => button.onclick = () => {
       selectedResult = results[Number(button.dataset.reviewFood)];
-      servingsText = '1'; selectedMeal = 'Lunch'; errorText = ''; draw();
+      servingsText = '1'; selectedMeal = preferredMeal; errorText = ''; draw();
     });
   };
 
@@ -1778,6 +1887,7 @@ async function openFoodDatabaseSearchModal() {
         };
         await dbInsert('meal_entries', entryPayload);
         didLog = true;
+        rememberMeal(selectedMeal);
       }
     } catch (error) {
       saving = false;

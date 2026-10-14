@@ -83,6 +83,7 @@
           <button id="signout-btn" class="ghost">Log Out</button>
         </div>
       </header>
+      <div id="connection-banner" class="connection-banner hidden" role="status" aria-live="polite"></div>
 
       <main class="page-wrap">
         <section id="today-page" class="page"></section>
@@ -107,7 +108,7 @@
   </div>
 
   <div id="modal-root"></div>
-  <div id="toast-root" class="toast-root"></div>
+  <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
