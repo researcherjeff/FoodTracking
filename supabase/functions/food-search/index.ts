@@ -18,6 +18,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 type FdcNutrient = {
   nutrientId?: number;
   nutrientName?: string;
+  unitName?: string;
   value?: number | null;
   amount?: number | null;
   nutrient?: { id?: number; name?: string; number?: string };
@@ -36,14 +37,38 @@ type FdcFood = {
 };
 
 function nutrientValue(food: FdcFood, id: number, namePattern: RegExp): number {
-  const nutrient = (food.foodNutrients ?? []).find((item) => {
-    const itemId = item.nutrientId ?? item.nutrient?.id;
-    const itemName = item.nutrientName ?? item.nutrient?.name ?? "";
-    return itemId === id || namePattern.test(itemName);
-  });
-
+  const nutrients = food.foodNutrients ?? [];
+  // Prefer the exact FDC nutrient ID. A name-only match can otherwise choose a
+  // similarly named alternative before the official nutrient (notably energy).
+  let nutrient = nutrients.find((item) => (item.nutrientId ?? item.nutrient?.id) === id);
+  if (!nutrient) {
+    nutrient = nutrients.find((item) => {
+      const itemName = item.nutrientName ?? item.nutrient?.name ?? "";
+      if (!namePattern.test(itemName)) return false;
+      // Only use kcal energy as a calorie fallback; never treat kJ as kcal.
+      if (id === 1008 && /\bkj\b|kilojoule/i.test(item.unitName ?? "")) return false;
+      return true;
+    });
+  }
   const value = nutrient?.value ?? nutrient?.amount;
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function servingBasis(food: FdcFood): { servingSize: string; factor: number } {
+  // FoodData Central's search nutrients are standardized per 100 g or 100 ml.
+  // Convert them to the displayed package serving where a gram/ml weight exists,
+  // so the saved values really are per one FoodTracker serving.
+  const size = food.servingSize;
+  const unitRaw = String(food.servingSizeUnit ?? "").trim().toLowerCase();
+  const unit = unitRaw === "gram" || unitRaw === "grams" ? "g"
+    : unitRaw === "milliliter" || unitRaw === "milliliters" || unitRaw === "millilitre" || unitRaw === "millilitres" ? "ml"
+    : unitRaw;
+  if (typeof size === "number" && Number.isFinite(size) && size > 0 && (unit === "g" || unit === "ml")) {
+    const prettySize = Number.isInteger(size) ? String(size) : String(Number(size.toFixed(3)));
+    return { servingSize: `${prettySize} ${unit}`, factor: size / 100 };
+  }
+  // No unweighted household measure: the returned values are per 100 units.
+  return { servingSize: "100 g", factor: 1 };
 }
 
 Deno.serve(async (request: Request) => {
@@ -113,21 +138,26 @@ Deno.serve(async (request: Request) => {
     .filter((food) => typeof food.fdcId === "number" && Boolean(food.description?.trim()))
     .slice(0, 15)
     .map((food) => {
-      const servingSize = typeof food.servingSize === "number" && food.servingSize > 0
-        ? `${food.servingSize} ${food.servingSizeUnit || "g"}`
-        : (food.householdServingFullText?.trim() || "100 g");
+      const serving = servingBasis(food);
+      const per100 = {
+        calories: nutrientValue(food, 1008, /\benergy\b/i),
+        protein: nutrientValue(food, 1003, /\bprotein\b/i),
+        carbs: nutrientValue(food, 1005, /carbohydrate, by difference|total carbohydrate/i),
+        fat: nutrientValue(food, 1004, /total lipid \(fat\)|\btotal fat\b/i),
+        fiber: nutrientValue(food, 1079, /fiber, total dietary/i),
+      };
 
       return {
         fdcId: food.fdcId,
         description: food.description?.trim() ?? "Food",
         dataType: food.dataType ?? "",
         brandOwner: food.brandOwner ?? food.brandName ?? null,
-        servingSize,
-        calories: nutrientValue(food, 1008, /\benergy\b/i),
-        protein: nutrientValue(food, 1003, /\bprotein\b/i),
-        carbs: nutrientValue(food, 1005, /carbohydrate, by difference|total carbohydrate/i),
-        fat: nutrientValue(food, 1004, /total lipid \(fat\)|\btotal fat\b/i),
-        fiber: nutrientValue(food, 1079, /fiber, total dietary/i),
+        servingSize: serving.servingSize,
+        calories: per100.calories * serving.factor,
+        protein: per100.protein * serving.factor,
+        carbs: per100.carbs * serving.factor,
+        fat: per100.fat * serving.factor,
+        fiber: per100.fiber * serving.factor,
       };
     });
 

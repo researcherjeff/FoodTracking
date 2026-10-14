@@ -1,0 +1,2 @@
+[functions.food-search]
+verify_jwt = true
